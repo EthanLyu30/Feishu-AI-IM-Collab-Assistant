@@ -1,0 +1,23 @@
+{
+  "name": "feishu-ai-im-collab-assistant",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Agent-Pilot: IM-driven office collaboration assistant for Feishu competition.",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n api,web -c cyan,magenta \"npm run dev -w @agent-pilot/api\" \"npm run dev -w @agent-pilot/web\"",
+    "dev:api": "npm run dev -w @agent-pilot/api",
+    "dev:web": "npm run dev -w @agent-pilot/web",
+    "build": "npm run build --workspaces",
+    "typecheck": "npm run typecheck --workspaces",
+    "test:e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1",
+    "concurrently": "^9.2.1",
+    "typescript": "^5.9.3"
+  }
+}
