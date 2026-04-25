@@ -23,10 +23,11 @@ export interface ExportArtifactInput {
 
 export interface OfficeToolAdapter {
   name: "mock" | "lark-cli";
-  readMessages(): Promise<MessageContext>;
+  readMessages(chatId?: string): Promise<MessageContext>;
   createDoc(input: CreateDocInput): Promise<Artifact>;
   updateDoc(input: UpdateDocInput): Promise<Artifact>;
   createSlides(input: CreateSlidesInput): Promise<Artifact>;
   exportArtifact(input: ExportArtifactInput): Promise<Artifact>;
+  sendMessage?(chatId: string, markdown: string): Promise<void>;
 }
 

@@ -12,7 +12,8 @@ const envSchema = z.object({
   ARK_ENDPOINT_ID: z.string().optional(),
   ARK_API_KEY: z.string().optional(),
   OFFICE_ADAPTER: z.enum(["mock", "lark-cli"]).default("mock"),
-  LARK_CLI_BIN: z.string().default("lark-cli")
+  LARK_CLI_BIN: z.string().default("lark-cli"),
+  LARK_DEFAULT_CHAT_ID: z.string().optional()
 });
 
 const parsed = envSchema.parse(process.env);
@@ -25,10 +26,10 @@ export const config = {
   arkApiKey: parsed.ARK_API_KEY,
   officeAdapter: parsed.OFFICE_ADAPTER,
   larkCliBin: parsed.LARK_CLI_BIN,
+  larkDefaultChatId: parsed.LARK_DEFAULT_CHAT_ID,
   get useDoubao() {
     return Boolean(
       parsed.AGENT_LLM_MODE === "doubao" && parsed.ARK_ENDPOINT_ID && parsed.ARK_API_KEY
     );
   }
 };
-

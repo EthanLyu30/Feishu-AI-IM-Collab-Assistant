@@ -188,4 +188,3 @@ export class AgentOrchestrator {
     return intent.length > 28 ? `${intent.slice(0, 28)}...` : intent;
   }
 }
-
