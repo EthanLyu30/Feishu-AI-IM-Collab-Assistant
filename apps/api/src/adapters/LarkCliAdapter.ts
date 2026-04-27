@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { writeFile, mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { Artifact, MessageContext } from "@agent-pilot/shared";
 import type { CreateDocInput, CreateSlidesInput, ExportArtifactInput, OfficeToolAdapter, SendMessageInput, UpdateDocInput } from "./OfficeToolAdapter";
 import { createId, nowIso } from "../utils/id";
@@ -77,15 +78,15 @@ export class LarkCliAdapter implements OfficeToolAdapter {
     const tmpDir = join(process.cwd(), ".tmp");
     await mkdir(tmpDir, { recursive: true });
 
-    const tmpFile = join(tmpDir, `${createId("doc")}.md`);
+    const tmpFileName = `${createId("doc")}.md`;
+    const tmpFile = join(tmpDir, tmpFileName);
     await writeFile(tmpFile, input.markdown, "utf-8");
 
     const output = await this.run([
       "docs", "+create",
       "--as", "user",
       "--title", input.title,
-      "--markdown", `@${tmpFile}`,
-      "--format", "json"
+      "--markdown", `@./.tmp/${tmpFileName}`
     ]);
 
     const docUrl = this.extractUrl(output);
@@ -189,9 +190,10 @@ export class LarkCliAdapter implements OfficeToolAdapter {
 
   private run(args: string[]) {
     return new Promise<string>((resolve, reject) => {
-      const child = spawn(this.cliBin, args, {
+      const command = this.buildCommand(args);
+      const child = spawn(command.bin, command.args, {
         stdio: ["ignore", "pipe", "pipe"],
-        shell: process.platform === "win32"
+        windowsHide: true
       });
 
       let stdout = "";
@@ -212,5 +214,37 @@ export class LarkCliAdapter implements OfficeToolAdapter {
         }
       });
     });
+  }
+
+  private buildCommand(args: string[]) {
+    if (process.platform !== "win32") {
+      return { bin: this.cliBin, args };
+    }
+
+    const runJs = this.resolveWindowsRunJs();
+    if (runJs) {
+      return { bin: process.execPath, args: [runJs, ...args] };
+    }
+
+    return { bin: this.cliBin, args };
+  }
+
+  private resolveWindowsRunJs() {
+    const wrapperDir =
+      /[\\/]/.test(this.cliBin) ? dirname(this.cliBin.replace(/\.(cmd|ps1)$/i, "")) : undefined;
+    const candidates = [
+      wrapperDir
+        ? join(wrapperDir, "node_modules", "@larksuite", "cli", "scripts", "run.js")
+        : undefined,
+      join(process.cwd(), "node_modules", "@larksuite", "cli", "scripts", "run.js"),
+      process.env.APPDATA
+        ? join(process.env.APPDATA, "npm", "node_modules", "@larksuite", "cli", "scripts", "run.js")
+        : undefined,
+      process.env.npm_config_prefix
+        ? join(process.env.npm_config_prefix, "node_modules", "@larksuite", "cli", "scripts", "run.js")
+        : undefined
+    ];
+
+    return candidates.find((candidate): candidate is string => Boolean(candidate && existsSync(candidate)));
   }
 }

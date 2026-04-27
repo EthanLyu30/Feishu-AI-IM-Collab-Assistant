@@ -2,8 +2,19 @@ import dotenv from "dotenv";
 import path from "node:path";
 import { z } from "zod";
 
-dotenv.config({ path: path.resolve(process.cwd(), ".env") });
-dotenv.config({ path: path.resolve(process.cwd(), ".env.local"), override: true });
+for (const envPath of [
+  path.resolve(process.cwd(), ".env"),
+  path.resolve(process.cwd(), "../../.env")
+]) {
+  dotenv.config({ path: envPath });
+}
+
+for (const envPath of [
+  path.resolve(process.cwd(), ".env.local"),
+  path.resolve(process.cwd(), "../../.env.local")
+]) {
+  dotenv.config({ path: envPath, override: true });
+}
 
 const envSchema = z.object({
   API_PORT: z.coerce.number().default(8787),
