@@ -4,6 +4,7 @@ import { writeFile, mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { Artifact, MessageContext } from "@agent-pilot/shared";
 import type { CreateDocInput, CreateSlidesInput, ExportArtifactInput, OfficeToolAdapter, SendMessageInput, UpdateDocInput } from "./OfficeToolAdapter";
+import { SlidesXmlBuilder } from "../slides/SlidesXmlBuilder";
 import { createId, nowIso } from "../utils/id";
 
 export class LarkCliAdapter implements OfficeToolAdapter {
@@ -122,7 +123,7 @@ export class LarkCliAdapter implements OfficeToolAdapter {
       "slides", "+create",
       "--as", "user",
       "--title", input.title,
-      "--slides", JSON.stringify(this.markdownToSlideXml(input.markdown))
+      "--slides", JSON.stringify(new SlidesXmlBuilder().build(input.markdown))
     ]);
     const slidesUrl = this.extractUrl(output);
 
@@ -188,38 +189,6 @@ export class LarkCliAdapter implements OfficeToolAdapter {
     const tmpFileName = `${createId(prefix)}.md`;
     await writeFile(join(tmpDir, tmpFileName), markdown, "utf-8");
     return tmpFileName;
-  }
-
-  private markdownToSlideXml(markdown: string) {
-    const sections = markdown
-      .split(/\n(?=#{1,2}\s+)/)
-      .map((section) => section.trim())
-      .filter(Boolean)
-      .slice(0, 10);
-
-    const fallbackSections = sections.length > 0 ? sections : ["# Agent-Pilot 汇报\n\n- 暂无演示内容"];
-
-    return fallbackSections.map((section) => {
-      const lines = section.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-      const title = lines.find((line) => /^#{1,3}\s+/.test(line))?.replace(/^#{1,3}\s+/, "") ?? "汇报页";
-      const bullets = lines
-        .filter((line) => /^[-*]\s+/.test(line) || /^讲者备注[:：]/.test(line))
-        .map((line) => line.replace(/^[-*]\s+/, "").replace(/^讲者备注[:：]\s*/, "讲者备注："))
-        .slice(0, 5);
-
-      const body = bullets.length > 0 ? bullets : lines.filter((line) => !/^#{1,3}\s+/.test(line)).slice(0, 4);
-      const bodyXml = body.map((item) => `<text>${this.escapeXml(item)}</text>`).join("");
-      return `<slide><text>${this.escapeXml(title)}</text>${bodyXml}</slide>`;
-    });
-  }
-
-  private escapeXml(value: string) {
-    return value
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&apos;");
   }
 
   private markdownToPlainText(markdown: string) {
