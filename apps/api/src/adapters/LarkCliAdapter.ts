@@ -30,32 +30,23 @@ export class LarkCliAdapter implements OfficeToolAdapter {
     const payload = this.parseJsonObject(output);
     const messages = payload as {
       data?: {
-        items?: Array<{
-          message_id?: string;
-          sender?: { sender_type?: string };
-          body?: { content?: string };
-          create_time?: string | number;
-        }>;
+        items?: LarkMessageItem[];
+        messages?: LarkMessageItem[];
       };
-      items?: Array<{
-        message_id?: string;
-        sender?: { sender_type?: string };
-        body?: { content?: string };
-        create_time?: string | number;
-      }>;
+      items?: LarkMessageItem[];
+      messages?: LarkMessageItem[];
     };
-    const items = messages.items ?? messages.data?.items ?? [];
+    const items = messages.items ?? messages.messages ?? messages.data?.items ?? messages.data?.messages ?? [];
+    const visibleItems = items.filter((item) => !item.deleted && this.extractText(this.getMessageContent(item)).trim());
 
     return {
       source: "feishu",
       chatName: `群聊 ${chatId}`,
-      messages: items.map((item, index) => ({
+      messages: visibleItems.map((item, index) => ({
         id: item.message_id ?? createId("msg"),
         sender: item.sender?.sender_type === "user" ? "user" : "system",
-        content: this.extractText(item.body?.content ?? ""),
-        timestamp: item.create_time
-          ? new Date(Number(item.create_time) * 1000).toISOString()
-          : new Date(Date.now() + index).toISOString()
+        content: this.extractText(this.getMessageContent(item)),
+        timestamp: this.parseTimestamp(item.create_time, index)
       }))
     };
   }
@@ -70,7 +61,7 @@ export class LarkCliAdapter implements OfficeToolAdapter {
       "im", "+messages-send",
       "--as", "user",
       "--chat-id", chatId,
-      "--markdown", input.markdown
+      "--text", this.markdownToPlainText(input.markdown)
     ]);
   }
 
@@ -104,17 +95,44 @@ export class LarkCliAdapter implements OfficeToolAdapter {
   }
 
   async updateDoc(input: UpdateDocInput): Promise<Artifact> {
-    throw new Error(`LarkCliAdapter.updateDoc is not wired yet. Reason: ${input.reason}`);
+    if (!input.artifact.url) {
+      throw new Error("LarkCliAdapter.updateDoc requires an artifact URL.");
+    }
+
+    const tmpFileName = await this.writeMarkdownTempFile(input.markdown, "doc-update");
+
+    await this.run([
+      "docs", "+update",
+      "--as", "user",
+      "--doc", input.artifact.url,
+      "--mode", "overwrite",
+      "--markdown", `@./.tmp/${tmpFileName}`
+    ]);
+
+    return {
+      ...input.artifact,
+      version: input.artifact.version + 1,
+      content: input.markdown,
+      updatedAt: nowIso()
+    };
   }
 
   async createSlides(input: CreateSlidesInput): Promise<Artifact> {
+    const output = await this.run([
+      "slides", "+create",
+      "--as", "user",
+      "--title", input.title,
+      "--slides", JSON.stringify(this.markdownToSlideXml(input.markdown))
+    ]);
+    const slidesUrl = this.extractUrl(output);
+
     return {
       id: createId("slides"),
       type: "slides",
       title: input.title,
       version: 1,
       content: input.markdown,
-      url: "https://feishu.cn/slides/mock",
+      url: slidesUrl,
       createdBy: "agent",
       updatedAt: nowIso()
     };
@@ -143,6 +161,73 @@ export class LarkCliAdapter implements OfficeToolAdapter {
     } catch {
       return content;
     }
+  }
+
+  private getMessageContent(item: LarkMessageItem) {
+    return item.body?.content ?? item.content ?? "";
+  }
+
+  private parseTimestamp(value: string | number | undefined, fallbackIndex: number) {
+    if (typeof value === "number" || /^\d+$/.test(value ?? "")) {
+      return new Date(Number(value) * 1000).toISOString();
+    }
+
+    if (value) {
+      const normalized = value.includes("T") ? value : value.replace(" ", "T") + "+08:00";
+      const parsed = new Date(normalized);
+      if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
+    }
+
+    return new Date(Date.now() + fallbackIndex).toISOString();
+  }
+
+  private async writeMarkdownTempFile(markdown: string, prefix: string) {
+    const tmpDir = join(process.cwd(), ".tmp");
+    await mkdir(tmpDir, { recursive: true });
+
+    const tmpFileName = `${createId(prefix)}.md`;
+    await writeFile(join(tmpDir, tmpFileName), markdown, "utf-8");
+    return tmpFileName;
+  }
+
+  private markdownToSlideXml(markdown: string) {
+    const sections = markdown
+      .split(/\n(?=#{1,2}\s+)/)
+      .map((section) => section.trim())
+      .filter(Boolean)
+      .slice(0, 10);
+
+    const fallbackSections = sections.length > 0 ? sections : ["# Agent-Pilot 汇报\n\n- 暂无演示内容"];
+
+    return fallbackSections.map((section) => {
+      const lines = section.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+      const title = lines.find((line) => /^#{1,3}\s+/.test(line))?.replace(/^#{1,3}\s+/, "") ?? "汇报页";
+      const bullets = lines
+        .filter((line) => /^[-*]\s+/.test(line) || /^讲者备注[:：]/.test(line))
+        .map((line) => line.replace(/^[-*]\s+/, "").replace(/^讲者备注[:：]\s*/, "讲者备注："))
+        .slice(0, 5);
+
+      const body = bullets.length > 0 ? bullets : lines.filter((line) => !/^#{1,3}\s+/.test(line)).slice(0, 4);
+      const bodyXml = body.map((item) => `<text>${this.escapeXml(item)}</text>`).join("");
+      return `<slide><text>${this.escapeXml(title)}</text>${bodyXml}</slide>`;
+    });
+  }
+
+  private escapeXml(value: string) {
+    return value
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&apos;");
+  }
+
+  private markdownToPlainText(markdown: string) {
+    return markdown
+      .replace(/^#{1,6}\s*/gm, "")
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1：$2")
+      .replace(/\*\*([^*]+)\*\*/g, "$1")
+      .trim();
   }
 
   private parseJsonObject(output: string): unknown {
@@ -247,4 +332,13 @@ export class LarkCliAdapter implements OfficeToolAdapter {
 
     return candidates.find((candidate): candidate is string => Boolean(candidate && existsSync(candidate)));
   }
+}
+
+interface LarkMessageItem {
+  message_id?: string;
+  sender?: { sender_type?: string };
+  body?: { content?: string };
+  content?: string;
+  create_time?: string | number;
+  deleted?: boolean;
 }
