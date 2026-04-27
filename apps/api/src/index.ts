@@ -40,7 +40,8 @@ app.get("/api/config", (_req, res) => {
     llmMode: llm.mode,
     officeAdapter: office.name,
     hasArkEndpoint: Boolean(config.arkEndpointId),
-    hasArkApiKey: Boolean(config.arkApiKey)
+    hasArkApiKey: Boolean(config.arkApiKey),
+    hasLarkDefaultChatId: Boolean(config.larkDefaultChatId)
   };
   res.json(runtimeConfig);
 });
@@ -83,4 +84,3 @@ server.listen(config.apiPort, () => {
   console.log(`Agent-Pilot API listening on http://localhost:${config.apiPort}`);
   console.log(`LLM mode: ${llm.mode}; office adapter: ${office.name}`);
 });
-

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Bot,
   CheckCircle2,
+  ExternalLink,
   FileText,
   Loader2,
   Monitor,
@@ -105,6 +106,11 @@ export function App() {
           <StatusPill label="实时同步" value={connection === "live" ? "Live" : connection} tone={connection === "live" ? "good" : "warn"} />
           <StatusPill label="LLM" value={runtimeConfig?.llmMode ?? "..."} tone={runtimeConfig?.llmMode === "doubao" ? "good" : "neutral"} />
           <StatusPill label="Office" value={runtimeConfig?.officeAdapter ?? "..."} tone="neutral" />
+          <StatusPill
+            label="测试群"
+            value={runtimeConfig?.hasLarkDefaultChatId ? "已配置" : "未配置"}
+            tone={runtimeConfig?.hasLarkDefaultChatId ? "good" : "warn"}
+          />
         </div>
       </header>
 
@@ -204,7 +210,10 @@ export function App() {
               <div className="eventList">
                 {taskEvents.slice(-8).reverse().map((event) => (
                   <div className="eventItem" key={event.id}>
-                    <span>{event.type}</span>
+                    <div>
+                      <span>{event.type}</span>
+                      {typeof event.payload.message === "string" ? <p>{event.payload.message}</p> : null}
+                    </div>
                     <time>{new Date(event.timestamp).toLocaleTimeString()}</time>
                   </div>
                 ))}
@@ -251,9 +260,14 @@ function ArtifactCard({ artifact }: { artifact: Artifact }) {
       <div>
         <strong>{artifact.title}</strong>
         <p>{artifact.type} · v{artifact.version}</p>
+        {artifact.url ? (
+          <a className="artifactLink" href={artifact.url} target="_blank" rel="noreferrer">
+            <ExternalLink size={14} />
+            打开产物
+          </a>
+        ) : null}
         <pre>{artifact.content.slice(0, 420)}</pre>
       </div>
     </article>
   );
 }
-

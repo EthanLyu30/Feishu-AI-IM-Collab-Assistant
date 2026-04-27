@@ -397,6 +397,21 @@ textarea:focus {
   line-height: 1.45;
 }
 
+.artifactLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  color: #2f61d5;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.artifactLink:hover {
+  text-decoration: underline;
+}
+
 .eventItem {
   display: flex;
   align-items: center;
@@ -414,6 +429,13 @@ textarea:focus {
 .eventItem time {
   color: #68758e;
   font-size: 12px;
+}
+
+.eventItem p {
+  margin: 4px 0 0;
+  color: #68758e;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .empty {
@@ -460,4 +482,3 @@ textarea:focus {
     border-radius: 20px;
   }
 }
-

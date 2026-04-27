@@ -153,14 +153,26 @@ export class AgentOrchestrator {
 
         if (step.tool === "summary.deliver") {
           const currentTask = this.store.getTask(taskId);
+          const currentArtifacts = currentTask?.artifacts ?? [];
           const summary = await this.office.exportArtifact({
-            artifacts: currentTask?.artifacts ?? [],
+            artifacts: currentArtifacts,
             summary:
               rehearsalMarkdown ||
               "本次任务已完成需求文档、演示稿和汇报讲稿生成，后续可接入真实飞书链接。"
           });
           this.store.upsertArtifact(taskId, summary);
           this.store.emit(taskId, "task.delivered", { artifact: summary });
+          if (this.office.sendMessage) {
+            try {
+              await this.office.sendMessage({
+                markdown: this.buildDeliveryMarkdown(currentArtifacts, summary)
+              });
+            } catch (error) {
+              this.store.emit(taskId, "integration.warning", {
+                message: error instanceof Error ? error.message : "Failed to send Lark delivery message."
+              });
+            }
+          }
           this.store.updateStep(taskId, step.id, {
             status: "completed",
             completedAt: nowIso(),
@@ -186,5 +198,14 @@ export class AgentOrchestrator {
 
   private titleFromIntent(intent: string) {
     return intent.length > 28 ? `${intent.slice(0, 28)}...` : intent;
+  }
+
+  private buildDeliveryMarkdown(artifacts: Artifact[], summary: Artifact) {
+    const links = artifacts
+      .filter((artifact) => artifact.url)
+      .map((artifact) => `- [${artifact.title}](${artifact.url})`)
+      .join("\n");
+
+    return `## Agent-Pilot 任务交付\n\n${links || "- 暂无可打开链接"}\n\n交付摘要：${summary.title}`;
   }
 }

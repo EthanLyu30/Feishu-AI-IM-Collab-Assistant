@@ -21,14 +21,19 @@ export function buildPlannerPrompt(intent: string, context: MessageContext) {
             steps: [
               {
                 title: "string",
-                tool: "im.read | doc.create | slides.create | rehearsal.create | summary.deliver",
+                tool: "im.read 或 doc.create 或 slides.create 或 rehearsal.create 或 summary.deliver",
                 inputSummary: "string",
                 expectedOutput: "string"
               }
             ],
             requiredConfirmations: ["string"],
             risks: ["string"]
-          }
+          },
+          constraints: [
+            "steps 至少包含 im.read、doc.create、summary.deliver",
+            "如果用户要求 PPT 或演讲稿，应包含 slides.create 和 rehearsal.create",
+            "tool 字段只能从允许枚举中选择，不要自造工具名"
+          ]
         },
         null,
         2
@@ -85,4 +90,3 @@ export function buildRehearsalPrompt(slidesMarkdown: string) {
     }
   ];
 }
-

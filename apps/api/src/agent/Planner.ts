@@ -2,18 +2,7 @@ import type { AgentPlan, AgentStep, MessageContext } from "@agent-pilot/shared";
 import type { AgentLlm } from "../llm/AgentLlm";
 import { createId } from "../utils/id";
 import { buildPlannerPrompt } from "./prompts";
-
-type PlannerDraft = {
-  goal: string;
-  steps: Array<{
-    title: string;
-    tool: string;
-    inputSummary: string;
-    expectedOutput: string;
-  }>;
-  requiredConfirmations?: string[];
-  risks?: string[];
-};
+import { plannerDraftSchema, type PlannerDraft } from "./schemas";
 
 export class Planner {
   constructor(private readonly llm: AgentLlm) {}
@@ -23,11 +12,36 @@ export class Planner {
       return this.mockPlan(intent);
     }
 
-    const draft = await this.llm.completeJson<PlannerDraft>(buildPlannerPrompt(intent, context), {
-      temperature: 0.1
-    });
+    const draft = await this.planWithRetry(intent, context);
 
     return this.normalizePlan(draft, intent);
+  }
+
+  private async planWithRetry(intent: string, context: MessageContext): Promise<PlannerDraft> {
+    const messages = buildPlannerPrompt(intent, context);
+    const first = await this.llm.completeJson<unknown>(messages, { temperature: 0.1 });
+    const parsed = plannerDraftSchema.safeParse(first);
+    if (parsed.success) return parsed.data;
+
+    const retry = await this.llm.completeJson<unknown>(
+      [
+        ...messages,
+        {
+          role: "assistant",
+          content: JSON.stringify(first)
+        },
+        {
+          role: "user",
+          content:
+            "上一次输出不符合 schema。请只输出合法 JSON，steps[].tool 只能是 im.read、doc.create、slides.create、rehearsal.create、summary.deliver。"
+        }
+      ],
+      { temperature: 0 }
+    );
+    const retryParsed = plannerDraftSchema.safeParse(retry);
+    if (retryParsed.success) return retryParsed.data;
+
+    throw new Error(`Planner output failed schema validation: ${retryParsed.error.message}`);
   }
 
   private mockPlan(intent: string): AgentPlan {
@@ -88,9 +102,8 @@ export class Planner {
     return {
       goal: draft.goal || intent,
       steps,
-      requiredConfirmations: draft.requiredConfirmations ?? [],
-      risks: draft.risks ?? []
+      requiredConfirmations: draft.requiredConfirmations,
+      risks: draft.risks
     };
   }
 }
-

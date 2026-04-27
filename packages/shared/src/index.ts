@@ -22,7 +22,8 @@ export type AgentEventType =
   | "artifact.updated"
   | "user.commanded"
   | "task.delivered"
-  | "task.failed";
+  | "task.failed"
+  | "integration.warning";
 
 export interface ChatMessage {
   id: string;
@@ -102,6 +103,7 @@ export interface RuntimeConfig {
   officeAdapter: "mock" | "lark-cli";
   hasArkEndpoint: boolean;
   hasArkApiKey: boolean;
+  hasLarkDefaultChatId: boolean;
 }
 
 export const sampleDiscussion: ChatMessage[] = [
@@ -139,4 +141,3 @@ export const sampleDiscussion: ChatMessage[] = [
 
 export const sampleIntent =
   "帮我把刚才关于校园活动报名系统的讨论整理成需求文档，并生成一份 5 页汇报 PPT，最后给我一段 3 分钟讲稿。";
-
