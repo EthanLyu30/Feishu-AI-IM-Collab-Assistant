@@ -1,5 +1,7 @@
 export type TaskSource = "im" | "mobile" | "desktop" | "api";
 
+export type TaskTriggerSource = "web" | "lark-im";
+
 export type TaskStatus =
   | "created"
   | "planning"
@@ -72,6 +74,7 @@ export interface Task {
   id: string;
   title: string;
   source: TaskSource;
+  trigger?: TaskTrigger;
   status: TaskStatus;
   userIntent: string;
   plan?: AgentPlan;
@@ -79,6 +82,14 @@ export interface Task {
   createdAt: string;
   updatedAt: string;
   error?: string;
+}
+
+export interface TaskTrigger {
+  source: TaskTriggerSource;
+  chatId?: string;
+  messageId?: string;
+  sender?: string;
+  rawText?: string;
 }
 
 export interface AgentEvent {
@@ -92,10 +103,29 @@ export interface AgentEvent {
 export interface CreateTaskRequest {
   intent: string;
   source?: TaskSource;
+  trigger?: TaskTrigger;
 }
 
 export interface SendCommandRequest {
   command: string;
+}
+
+export interface LarkImTriggerRequest {
+  chatId?: string;
+  messageId?: string;
+  sender?: string;
+  text?: string;
+  event?: unknown;
+  challenge?: string;
+}
+
+export interface LarkImTriggerResponse {
+  accepted: boolean;
+  ignored: boolean;
+  reason?: string;
+  challenge?: string;
+  task?: Task;
+  trigger?: TaskTrigger;
 }
 
 export interface RuntimeConfig {
@@ -104,6 +134,7 @@ export interface RuntimeConfig {
   hasArkEndpoint: boolean;
   hasArkApiKey: boolean;
   hasLarkDefaultChatId: boolean;
+  larkImTriggerPath: string;
 }
 
 export const sampleDiscussion: ChatMessage[] = [

@@ -28,12 +28,13 @@ export class TaskStore {
     return this.tasks.get(taskId);
   }
 
-  createTask(input: { title: string; source: TaskSource; userIntent: string }) {
+  createTask(input: { title: string; source: TaskSource; userIntent: string; trigger?: Task["trigger"] }) {
     const now = nowIso();
     const task: Task = {
       id: createId("task"),
       title: input.title,
       source: input.source,
+      trigger: input.trigger,
       status: "created",
       userIntent: input.userIntent,
       artifacts: [],
@@ -127,4 +128,3 @@ export class TaskStore {
     return task;
   }
 }
-

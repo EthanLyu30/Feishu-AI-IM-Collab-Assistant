@@ -1,6 +1,9 @@
 import dotenv from "dotenv";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
+
+const explicitEnv = new Set(Object.keys(process.env));
 
 for (const envPath of [
   path.resolve(process.cwd(), ".env"),
@@ -13,7 +16,7 @@ for (const envPath of [
   path.resolve(process.cwd(), ".env.local"),
   path.resolve(process.cwd(), "../../.env.local")
 ]) {
-  dotenv.config({ path: envPath, override: true });
+  loadLocalEnv(envPath, explicitEnv);
 }
 
 const envSchema = z.object({
@@ -44,3 +47,14 @@ export const config = {
     );
   }
 };
+
+function loadLocalEnv(envPath: string, explicitKeys: Set<string>) {
+  if (!existsSync(envPath)) return;
+
+  const parsed = dotenv.parse(readFileSync(envPath));
+  for (const [key, value] of Object.entries(parsed)) {
+    if (!explicitKeys.has(key)) {
+      process.env[key] = value;
+    }
+  }
+}

@@ -2,22 +2,54 @@ import cors from "cors";
 import express from "express";
 import { createServer } from "node:http";
 import { z } from "zod";
-import type { CreateTaskRequest, RuntimeConfig, SendCommandRequest } from "@agent-pilot/shared";
+import type {
+  CreateTaskRequest,
+  LarkImTriggerRequest,
+  LarkImTriggerResponse,
+  RuntimeConfig,
+  SendCommandRequest
+} from "@agent-pilot/shared";
 import { createOfficeAdapter } from "./adapters/createOfficeAdapter";
 import { AgentOrchestrator } from "./agent/AgentOrchestrator";
 import { config } from "./env";
 import { createLlm } from "./llm/createLlm";
 import { attachRealtime } from "./realtime";
 import { TaskStore } from "./state/TaskStore";
+import {
+  buildTaskTrigger,
+  extractLarkImTrigger,
+  sanitizeIntent,
+  shouldTriggerAgent
+} from "./triggers/larkImTrigger";
 
 const createTaskSchema = z.object({
   intent: z.string().min(1),
-  source: z.enum(["im", "mobile", "desktop", "api"]).default("im")
+  source: z.enum(["im", "mobile", "desktop", "api"]).default("im"),
+  trigger: z
+    .object({
+      source: z.enum(["web", "lark-im"]),
+      chatId: z.string().optional(),
+      messageId: z.string().optional(),
+      sender: z.string().optional(),
+      rawText: z.string().optional()
+    })
+    .optional()
 }) satisfies z.ZodType<CreateTaskRequest>;
 
 const commandSchema = z.object({
   command: z.string().min(1)
 }) satisfies z.ZodType<SendCommandRequest>;
+
+const larkImTriggerSchema = z
+  .object({
+    chatId: z.string().optional(),
+    messageId: z.string().optional(),
+    sender: z.string().optional(),
+    text: z.string().optional(),
+    event: z.unknown().optional(),
+    challenge: z.string().optional()
+  })
+  .passthrough() satisfies z.ZodType<LarkImTriggerRequest>;
 
 const app = express();
 const server = createServer(app);
@@ -25,6 +57,7 @@ const store = new TaskStore();
 const llm = createLlm();
 const office = createOfficeAdapter();
 const orchestrator = new AgentOrchestrator(store, llm, office);
+const handledLarkMessages = new Map<string, string>();
 
 attachRealtime(server, store);
 
@@ -41,7 +74,8 @@ app.get("/api/config", (_req, res) => {
     officeAdapter: office.name,
     hasArkEndpoint: Boolean(config.arkEndpointId),
     hasArkApiKey: Boolean(config.arkApiKey),
-    hasLarkDefaultChatId: Boolean(config.larkDefaultChatId)
+    hasLarkDefaultChatId: Boolean(config.larkDefaultChatId),
+    larkImTriggerPath: "/api/triggers/lark-im"
   };
   res.json(runtimeConfig);
 });
@@ -64,6 +98,66 @@ app.post("/api/tasks", (req, res) => {
   const task = orchestrator.createTask(input);
   res.status(202).json({ task });
 });
+
+const handleLarkImTrigger: express.RequestHandler = (req, res) => {
+  const input = larkImTriggerSchema.parse(req.body);
+  if (input.challenge) {
+    const response: LarkImTriggerResponse = {
+      accepted: false,
+      ignored: true,
+      challenge: input.challenge,
+      reason: "lark.challenge"
+    };
+    res.json(response);
+    return;
+  }
+
+  const extracted = extractLarkImTrigger(input);
+  if (!shouldTriggerAgent(extracted.text)) {
+    const response: LarkImTriggerResponse = {
+      accepted: false,
+      ignored: true,
+      reason: "message does not match agent trigger keywords",
+      trigger: buildTaskTrigger(extracted)
+    };
+    res.json(response);
+    return;
+  }
+
+  if (extracted.messageId && handledLarkMessages.has(extracted.messageId)) {
+    const response: LarkImTriggerResponse = {
+      accepted: false,
+      ignored: true,
+      reason: "duplicate message ignored",
+      trigger: buildTaskTrigger(extracted)
+    };
+    res.json(response);
+    return;
+  }
+
+  const intent = sanitizeIntent(extracted.text);
+  const task = orchestrator.createTask({
+    intent:
+      intent ||
+      "请读取当前飞书群最近讨论，整理正式需求文档，生成汇报 Slides 和 3 分钟讲稿，并把交付摘要回发到群里。",
+    source: "im",
+    trigger: buildTaskTrigger(extracted)
+  });
+  if (extracted.messageId) {
+    handledLarkMessages.set(extracted.messageId, task.id);
+  }
+
+  const response: LarkImTriggerResponse = {
+    accepted: true,
+    ignored: false,
+    task,
+    trigger: task.trigger
+  };
+  res.status(202).json(response);
+};
+
+app.post("/api/lark/events", handleLarkImTrigger);
+app.post("/api/triggers/lark-im", handleLarkImTrigger);
 
 app.post("/api/tasks/:taskId/commands", async (req, res, next) => {
   try {

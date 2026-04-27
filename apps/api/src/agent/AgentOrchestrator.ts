@@ -1,4 +1,4 @@
-import type { Artifact, TaskSource } from "@agent-pilot/shared";
+import type { Artifact, TaskSource, TaskTrigger } from "@agent-pilot/shared";
 import type { OfficeToolAdapter } from "../adapters/OfficeToolAdapter";
 import type { AgentLlm } from "../llm/AgentLlm";
 import { TaskStore } from "../state/TaskStore";
@@ -19,11 +19,12 @@ export class AgentOrchestrator {
     this.composer = new ContentComposer(llm);
   }
 
-  createTask(input: { intent: string; source: TaskSource }) {
+  createTask(input: { intent: string; source: TaskSource; trigger?: TaskTrigger }) {
     const task = this.store.createTask({
       title: this.titleFromIntent(input.intent),
       source: input.source,
-      userIntent: input.intent
+      userIntent: input.intent,
+      trigger: input.trigger
     });
 
     void this.runTask(task.id);
@@ -78,7 +79,7 @@ export class AgentOrchestrator {
       if (!task) throw new Error("Task not found.");
 
       await delay(300);
-      const context = await this.office.readMessages();
+      const context = await this.office.readMessages(task.trigger?.chatId);
       const plan = await this.planner.plan(task.userIntent, context);
       this.store.setPlan(taskId, plan);
       this.store.setStatus(taskId, "running");

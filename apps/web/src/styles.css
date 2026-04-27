@@ -272,12 +272,24 @@ textarea:focus {
   gap: 14px;
 }
 
+.overviewStrip {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.9fr) minmax(340px, 1.2fr) minmax(280px, 1fr);
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
 .panel {
   border: 1px solid rgba(76, 92, 126, 0.14);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.84);
   box-shadow: 0 20px 50px rgba(37, 49, 78, 0.08);
   padding: 18px;
+}
+
+.miniPanel {
+  min-height: 178px;
+  padding: 16px;
 }
 
 .taskPanel,
@@ -297,11 +309,133 @@ textarea:focus {
   align-items: center;
 }
 
+.statusStack,
+.confirmList {
+  display: grid;
+  gap: 10px;
+}
+
+.statusRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px;
+  border: 1px solid rgba(76, 92, 126, 0.12);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.statusRow strong,
+.deliveryTile strong,
+.confirmItem strong {
+  display: block;
+  color: #172033;
+  font-size: 14px;
+}
+
+.statusRow p,
+.deliveryTile p,
+.confirmItem p {
+  margin: 4px 0 0;
+  color: #68758e;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.statusRow > span,
+.deliveryTile span,
+.confirmItem > span {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: #eef2f7;
+  color: #42506b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.statusRow.good > span,
+.deliveryTile.good span {
+  color: #08775f;
+  background: #ddf5ed;
+}
+
+.statusRow.warn > span,
+.deliveryTile.warn span,
+.confirmItem.warn > span {
+  color: #a15c00;
+  background: #fff4dd;
+}
+
+.deliveryGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.deliveryTile {
+  display: grid;
+  grid-template-columns: 30px 1fr;
+  gap: 10px;
+  min-width: 0;
+  padding: 11px;
+  border: 1px solid rgba(76, 92, 126, 0.12);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.deliveryIcon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  color: #2f61d5;
+  background: #e3ebff;
+}
+
+.deliveryTile span {
+  display: inline-block;
+  margin-top: 6px;
+}
+
+.confirmItem {
+  display: grid;
+  grid-template-columns: 68px 1fr;
+  gap: 10px;
+  padding: 11px;
+  border: 1px solid rgba(76, 92, 126, 0.12);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.confirmItem > span {
+  align-self: start;
+  text-align: center;
+}
+
+.taskBadges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .taskBadge {
   padding: 6px 10px;
   border-radius: 8px;
   background: #e7edf8;
   color: #42506b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.sourceBadge {
+  padding: 6px 10px;
+  border-radius: 8px;
+  color: #2f61d5;
+  background: #e3ebff;
   font-size: 12px;
   font-weight: 800;
 }
@@ -454,6 +588,10 @@ textarea:focus {
     grid-template-columns: 1fr;
   }
 
+  .overviewStrip {
+    grid-template-columns: 1fr;
+  }
+
   .phoneFrame {
     min-height: 600px;
   }
@@ -468,6 +606,10 @@ textarea:focus {
   .dashboardGrid {
     grid-template-columns: 1fr;
     display: grid;
+  }
+
+  .deliveryGrid {
+    grid-template-columns: 1fr;
   }
 
   .statusRail {
