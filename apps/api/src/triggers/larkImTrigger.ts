@@ -11,10 +11,11 @@ export const larkTriggerKeywords = [
   "生成 PPT"
 ];
 
-interface ExtractedLarkTrigger {
+export interface ExtractedLarkTrigger {
   chatId?: string;
   messageId?: string;
   sender?: string;
+  senderType?: string;
   text: string;
 }
 
@@ -37,6 +38,7 @@ export function extractLarkImTrigger(input: LarkImTriggerRequest): ExtractedLark
       sender?.sender_id?.open_id ??
       sender?.sender_id?.user_id ??
       sender?.sender_id?.union_id,
+    senderType: (input as { senderType?: string }).senderType ?? sender?.sender_type,
     text
   };
 }
@@ -69,6 +71,24 @@ export function isConfirmationText(text: string) {
     "approve",
     "/approve"
   ].some((keyword) => normalized.includes(keyword));
+}
+
+export function isCancelText(text: string) {
+  const normalized = text.trim().replace(/\s+/g, "").toLocaleLowerCase();
+  if (!normalized) return false;
+
+  return ["取消", "停止", "终止", "不确认", "不用", "不要", "cancel", "/cancel"].some((keyword) =>
+    normalized.includes(keyword)
+  );
+}
+
+export function isProgressText(text: string) {
+  const normalized = text.trim().replace(/\s+/g, "").toLocaleLowerCase();
+  if (!normalized) return false;
+
+  return ["进度", "状态", "到哪了", "做到哪", "status", "/status", "/progress"].some((keyword) =>
+    normalized.includes(keyword)
+  );
 }
 
 export function sanitizeIntent(text: string) {
@@ -110,6 +130,7 @@ interface LarkEventPayload {
     content?: string;
   };
   sender?: {
+    sender_type?: string;
     sender_id?: {
       open_id?: string;
       user_id?: string;

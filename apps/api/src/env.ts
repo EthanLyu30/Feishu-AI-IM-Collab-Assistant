@@ -27,7 +27,12 @@ const envSchema = z.object({
   ARK_API_KEY: z.string().optional(),
   OFFICE_ADAPTER: z.enum(["mock", "lark-cli"]).default("mock"),
   LARK_CLI_BIN: z.string().default("lark-cli"),
-  LARK_DEFAULT_CHAT_ID: z.string().optional()
+  LARK_DEFAULT_CHAT_ID: z.string().optional(),
+  LARK_EVENT_VERIFY_TOKEN: z.string().optional(),
+  LARK_ALLOWED_CHAT_IDS: z.string().optional(),
+  LARK_BOT_OPEN_ID: z.string().optional(),
+  LARK_BOT_USER_ID: z.string().optional(),
+  LARK_STATE_PATH: z.string().default(".data/lark-state.json")
 });
 
 const parsed = envSchema.parse(process.env);
@@ -41,12 +46,26 @@ export const config = {
   officeAdapter: parsed.OFFICE_ADAPTER,
   larkCliBin: parsed.LARK_CLI_BIN,
   larkDefaultChatId: parsed.LARK_DEFAULT_CHAT_ID,
+  larkEventVerifyToken: parsed.LARK_EVENT_VERIFY_TOKEN,
+  larkAllowedChatIds: splitCsv(parsed.LARK_ALLOWED_CHAT_IDS),
+  larkBotOpenId: parsed.LARK_BOT_OPEN_ID,
+  larkBotUserId: parsed.LARK_BOT_USER_ID,
+  larkStatePath: parsed.LARK_STATE_PATH,
   get useDoubao() {
     return Boolean(
       parsed.AGENT_LLM_MODE === "doubao" && parsed.ARK_ENDPOINT_ID && parsed.ARK_API_KEY
     );
   }
 };
+
+function splitCsv(value: string | undefined) {
+  return (
+    value
+      ?.split(",")
+      .map((item) => item.trim())
+      .filter(Boolean) ?? []
+  );
+}
 
 function loadLocalEnv(envPath: string, explicitKeys: Set<string>) {
   if (!existsSync(envPath)) return;

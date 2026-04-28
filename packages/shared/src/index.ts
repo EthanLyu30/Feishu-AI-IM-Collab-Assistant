@@ -8,6 +8,7 @@ export type TaskStatus =
   | "running"
   | "waiting_user"
   | "completed"
+  | "cancelled"
   | "failed";
 
 export type StepStatus = "pending" | "running" | "completed" | "failed" | "skipped";
@@ -20,6 +21,7 @@ export type AgentEventType =
   | "task.planned"
   | "task.waiting_confirmation"
   | "task.confirmed"
+  | "task.cancelled"
   | "step.started"
   | "step.completed"
   | "artifact.created"

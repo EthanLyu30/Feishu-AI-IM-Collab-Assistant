@@ -86,6 +86,56 @@ export class AgentOrchestrator {
     return this.store.getTask(taskId);
   }
 
+  async cancelTask(taskId: string, command = "取消") {
+    const task = this.store.getTask(taskId);
+    if (!task) throw new Error("Task not found.");
+    if (task.status === "completed" || task.status === "cancelled") {
+      return task;
+    }
+
+    this.store.emit(taskId, "user.commanded", { command, kind: "cancel" });
+    const cancelled = this.store.setStatus(taskId, "cancelled", "User cancelled the task.");
+    this.store.emit(taskId, "task.cancelled", { command });
+
+    if (this.office.sendMessage) {
+      try {
+        await this.office.sendMessage({
+          chatId: task.trigger?.chatId,
+          markdown: `Agent-Pilot 已取消当前任务：${task.title}`
+        });
+      } catch (error) {
+        this.store.emit(taskId, "integration.warning", {
+          message: error instanceof Error ? error.message : "Failed to send Lark cancellation message."
+        });
+      }
+    }
+
+    return cancelled;
+  }
+
+  async reportTaskProgress(taskId: string, command = "进度") {
+    const task = this.store.getTask(taskId);
+    if (!task) throw new Error("Task not found.");
+
+    this.store.emit(taskId, "user.commanded", { command, kind: "progress" });
+    const markdown = this.buildProgressMarkdown(task);
+
+    if (this.office.sendMessage) {
+      try {
+        await this.office.sendMessage({
+          chatId: task.trigger?.chatId,
+          markdown
+        });
+      } catch (error) {
+        this.store.emit(taskId, "integration.warning", {
+          message: error instanceof Error ? error.message : "Failed to send Lark progress message."
+        });
+      }
+    }
+
+    return task;
+  }
+
   private async runTask(taskId: string) {
     try {
       this.store.setStatus(taskId, "planning");
@@ -125,6 +175,10 @@ export class AgentOrchestrator {
       let rehearsalMarkdown = "";
 
       for (const step of plan.steps) {
+        if (this.store.getTask(taskId)?.status === "cancelled") {
+          return;
+        }
+
         this.store.updateStep(taskId, step.id, { status: "running", startedAt: nowIso() });
         await delay(500);
 
@@ -226,7 +280,9 @@ export class AgentOrchestrator {
         });
       }
 
-      this.store.setStatus(taskId, "completed");
+      if (this.store.getTask(taskId)?.status !== "cancelled") {
+        this.store.setStatus(taskId, "completed");
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
       this.store.setStatus(taskId, "failed", message);
@@ -289,6 +345,28 @@ export class AgentOrchestrator {
       confirmations,
       "",
       "请在群里回复“确认”或“继续”，我就开始生成正式交付物。"
+    ].join("\n");
+  }
+
+  private buildProgressMarkdown(task: Task) {
+    const completedSteps = task.plan?.steps.filter((step) => step.status === "completed").length ?? 0;
+    const totalSteps = task.plan?.steps.length ?? 0;
+    const artifacts = task.artifacts
+      .filter((artifact) => artifact.url)
+      .map((artifact) => `- ${artifact.title}：${artifact.url}`)
+      .join("\n");
+
+    return [
+      "Agent-Pilot 当前任务进度",
+      "",
+      `任务：${task.title}`,
+      `状态：${task.status}`,
+      totalSteps > 0 ? `步骤：${completedSteps}/${totalSteps} 已完成` : "步骤：规划中",
+      "",
+      "已生成产物：",
+      artifacts || "- 暂无",
+      "",
+      task.status === "waiting_user" ? "当前正在等待群内回复“确认”或“取消”。" : "我会继续同步后续进展。"
     ].join("\n");
   }
 }

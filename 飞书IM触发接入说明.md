@@ -19,10 +19,23 @@ POST /api/lark/events
 - 扁平测试 payload：`chatId`、`messageId`、`sender`、`text`。
 - 飞书事件形状 payload：`event.message.chat_id`、`event.message.message_id`、`event.message.content`。
 - 关键词触发：`@Agent`、`@Agent-Pilot`、`/agent`、`Agent-Pilot`、`请整理`、`生成需求文档`、`生成汇报`、`生成 PPT`。
-- 同一个 `messageId` 幂等去重，避免重复事件导致重复生成文档和 Slides。
+- 同一个 `messageId` 幂等去重，避免重复事件导致重复生成文档和 Slides；默认写入 `.data/lark-state.json`，E2E 使用内存态。
+- 可选配置飞书 verify token、允许的测试群和机器人自身 ID，用于拒绝伪造请求、非白名单群和机器人自消息。
 - 任务会记录 `trigger.source = lark-im`，并保留 `chatId`、`messageId`、`sender`、`rawText`。
 - 群内触发后会先进入 `waiting_user` 状态，并在同一群聊等待用户回复“确认 / 继续 / 开始生成”等短指令。
 - 用户确认后，Agent 才继续执行 Docs、Slides、讲稿和交付摘要生成。
+- 群内支持最小会话命令：“进度”查看当前任务，“取消 / 停止”取消当前活跃任务。
+- 同一群存在 `created / planning / waiting_user / running` 任务时，新的触发消息会被拦截为 `chat session already active`，避免同群出现多个悬挂会话。
+
+可选环境变量：
+
+```env
+LARK_EVENT_VERIFY_TOKEN=
+LARK_ALLOWED_CHAT_IDS=
+LARK_BOT_OPEN_ID=
+LARK_BOT_USER_ID=
+LARK_STATE_PATH=.data/lark-state.json
+```
 
 ## 2. 本地模拟
 
@@ -77,6 +90,36 @@ Invoke-RestMethod `
   } | ConvertTo-Json)
 ```
 
+查询当前任务进度：
+
+```powershell
+Invoke-RestMethod `
+  -Method Post `
+  -Uri "http://localhost:8787/api/triggers/lark-im" `
+  -ContentType "application/json" `
+  -Body (@{
+    chatId = "oc_test"
+    messageId = "om_progress"
+    sender = "ou_user"
+    text = "进度"
+  } | ConvertTo-Json)
+```
+
+取消当前活跃任务：
+
+```powershell
+Invoke-RestMethod `
+  -Method Post `
+  -Uri "http://localhost:8787/api/triggers/lark-im" `
+  -ContentType "application/json" `
+  -Body (@{
+    chatId = "oc_test"
+    messageId = "om_cancel"
+    sender = "ou_user"
+    text = "取消"
+  } | ConvertTo-Json)
+```
+
 模拟飞书事件形状：
 
 ```powershell
@@ -121,15 +164,16 @@ https://你的域名/api/lark/events
 
 3. 完成飞书 challenge 验证。
 4. 只处理测试群、文本消息和 @Agent / 指令消息。
-5. 确认消息来源不是机器人自己，避免回发消息再次触发。
-6. 用 `message_id` 去重，避免重试事件重复生成产物。
+5. 配置 `LARK_ALLOWED_CHAT_IDS`，只允许测试群触发。
+6. 配置 `LARK_BOT_OPEN_ID` / `LARK_BOT_USER_ID`，确认消息来源不是机器人自己，避免回发消息再次触发。
+7. 用 `message_id` 去重，避免重试事件重复生成产物。
 
 ## 4. 当前限制
 
 - 还没有实现飞书事件签名校验。
-- 还没有过滤机器人自己发送的消息。
-- 还没有任务持久化，进程重启后幂等记录会丢失。
-- 已有最小“确认 / 继续执行”状态机，但还没有取消、改计划、多人审批和超时恢复。
+- 已支持 verify token、白名单群、机器人自消息过滤和 `messageId` 持久化去重，但还没有实现基于 raw body 的完整飞书事件签名校验。
+- 还没有完整任务持久化，进程重启后 Task / Event 本身仍会丢失。
+- 已有最小“确认 / 继续 / 进度 / 取消”状态机，但还没有改计划、多人审批和超时恢复。
 - 当前 Web 仪表盘仍是开发期页面，后续需要包装成飞书应用内页面。
 
 ## 5. 验证命令
@@ -146,5 +190,8 @@ npm run test:e2e
 - 普通消息忽略。
 - 扁平 payload 创建任务。
 - 群内确认消息继续执行任务。
+- 群内进度查询和取消任务。
+- 机器人自消息忽略。
+- 同群活跃会话互斥。
 - 飞书事件形状 payload 创建任务。
-- 重复 `messageId` 幂等忽略。
+- 重复 `messageId` 幂等忽略，并在非 E2E 模式下持久化到 `.data/`。

@@ -147,6 +147,125 @@ test.describe("Lark IM trigger API", () => {
       .toBe("waiting_user");
   });
 
+  test("ignores bot self messages", async ({ request }) => {
+    const response = await request.post("/api/triggers/lark-im", {
+      data: {
+        chatId: "oc_self",
+        messageId: "om_self",
+        sender: "ou_bot",
+        senderType: "app",
+        text: "/agent 请整理需求。"
+      }
+    });
+
+    await expect(response).toBeOK();
+    expect(await response.json()).toMatchObject({
+      accepted: false,
+      ignored: true,
+      reason: "bot self message ignored",
+      trigger: {
+        source: "lark-im",
+        chatId: "oc_self",
+        messageId: "om_self",
+        sender: "ou_bot"
+      }
+    });
+  });
+
+  test("supports progress and cancellation commands from the same chat", async ({ request }) => {
+    const response = await request.post("/api/triggers/lark-im", {
+      data: {
+        chatId: "oc_control",
+        messageId: "om_control_trigger",
+        sender: "ou_user",
+        text: "/agent 请整理群聊讨论，生成需求文档。"
+      }
+    });
+    expect(response.status()).toBe(202);
+    const body = await response.json();
+
+    await expect
+      .poll(async () => {
+        const taskResponse = await request.get(`/api/tasks/${body.task.id}`);
+        const taskBody = await taskResponse.json();
+        return taskBody.task.status;
+      }, { timeout: 12_000 })
+      .toBe("waiting_user");
+
+    const progress = await request.post("/api/triggers/lark-im", {
+      data: {
+        chatId: "oc_control",
+        messageId: "om_control_progress",
+        sender: "ou_user",
+        text: "进度"
+      }
+    });
+    expect(progress.status()).toBe(202);
+    expect(await progress.json()).toMatchObject({
+      accepted: true,
+      ignored: false,
+      reason: "reported task progress",
+      task: {
+        id: body.task.id,
+        status: "waiting_user"
+      }
+    });
+
+    const cancel = await request.post("/api/triggers/lark-im", {
+      data: {
+        chatId: "oc_control",
+        messageId: "om_control_cancel",
+        sender: "ou_user",
+        text: "取消"
+      }
+    });
+    expect(cancel.status()).toBe(202);
+    expect(await cancel.json()).toMatchObject({
+      accepted: true,
+      ignored: false,
+      reason: "cancelled active task"
+    });
+
+    await expect
+      .poll(async () => {
+        const taskResponse = await request.get(`/api/tasks/${body.task.id}`);
+        const taskBody = await taskResponse.json();
+        return taskBody.task.status;
+      }, { timeout: 12_000 })
+      .toBe("cancelled");
+  });
+
+  test("does not create a second active session for the same chat", async ({ request }) => {
+    const first = await request.post("/api/triggers/lark-im", {
+      data: {
+        chatId: "oc_busy",
+        messageId: "om_busy_first",
+        sender: "ou_user",
+        text: "/agent 请整理本轮讨论。"
+      }
+    });
+    expect(first.status()).toBe(202);
+    const firstBody = await first.json();
+
+    const second = await request.post("/api/triggers/lark-im", {
+      data: {
+        chatId: "oc_busy",
+        messageId: "om_busy_second",
+        sender: "ou_user",
+        text: "/agent 再生成一版新的汇报。"
+      }
+    });
+    await expect(second).toBeOK();
+    expect(await second.json()).toMatchObject({
+      accepted: false,
+      ignored: true,
+      reason: "chat session already active",
+      task: {
+        id: firstBody.task.id
+      }
+    });
+  });
+
   test("ignores duplicate message ids", async ({ request }) => {
     const payload = {
       chatId: "oc_test",

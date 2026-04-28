@@ -22,5 +22,5 @@ Thumbs.db
 
 # Temporary files
 .tmp/
+.data/
 outputs/*.local.*
-

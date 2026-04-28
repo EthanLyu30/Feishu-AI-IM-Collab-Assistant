@@ -7,18 +7,24 @@ import type {
   LarkImTriggerRequest,
   LarkImTriggerResponse,
   RuntimeConfig,
-  SendCommandRequest
+  SendCommandRequest,
+  Task,
+  TaskStatus
 } from "@agent-pilot/shared";
 import { createOfficeAdapter } from "./adapters/createOfficeAdapter";
 import { AgentOrchestrator } from "./agent/AgentOrchestrator";
 import { config } from "./env";
 import { createLlm } from "./llm/createLlm";
 import { attachRealtime } from "./realtime";
+import { validateLarkMessage, validateLarkVerifyToken } from "./security/LarkEventGuard";
+import { HandledMessageStore } from "./state/HandledMessageStore";
 import { TaskStore } from "./state/TaskStore";
 import {
   buildTaskTrigger,
   extractLarkImTrigger,
+  isCancelText,
   isConfirmationText,
+  isProgressText,
   sanitizeIntent,
   shouldTriggerAgent
 } from "./triggers/larkImTrigger";
@@ -47,7 +53,10 @@ const larkImTriggerSchema = z
     messageId: z.string().optional(),
     sender: z.string().optional(),
     text: z.string().optional(),
+    senderType: z.string().optional(),
     event: z.unknown().optional(),
+    token: z.string().optional(),
+    verification_token: z.string().optional(),
     challenge: z.string().optional()
   })
   .passthrough() satisfies z.ZodType<LarkImTriggerRequest>;
@@ -58,7 +67,7 @@ const store = new TaskStore();
 const llm = createLlm();
 const office = createOfficeAdapter();
 const orchestrator = new AgentOrchestrator(store, llm, office);
-const handledLarkMessages = new Map<string, string>();
+const handledLarkMessages = new HandledMessageStore(config.larkStatePath);
 
 attachRealtime(server, store);
 
@@ -103,6 +112,17 @@ app.post("/api/tasks", (req, res) => {
 const handleLarkImTrigger: express.RequestHandler = (req, res, next) => {
   try {
     const input = larkImTriggerSchema.parse(req.body);
+    const verifyDecision = validateLarkVerifyToken(req, input);
+    if (!verifyDecision.allowed) {
+      const response: LarkImTriggerResponse = {
+        accepted: false,
+        ignored: true,
+        reason: verifyDecision.reason ?? "lark verification failed"
+      };
+      res.status(verifyDecision.status ?? 403).json(response);
+      return;
+    }
+
     if (input.challenge) {
       const response: LarkImTriggerResponse = {
         accepted: false,
@@ -116,6 +136,18 @@ const handleLarkImTrigger: express.RequestHandler = (req, res, next) => {
 
     const extracted = extractLarkImTrigger(input);
     const trigger = buildTaskTrigger(extracted);
+    const messageDecision = validateLarkMessage(extracted);
+    if (!messageDecision.allowed) {
+      const response: LarkImTriggerResponse = {
+        accepted: false,
+        ignored: true,
+        reason: messageDecision.reason ?? "lark message ignored",
+        trigger
+      };
+      res.status(messageDecision.status ?? 200).json(response);
+      return;
+    }
+
     if (extracted.messageId && handledLarkMessages.has(extracted.messageId)) {
       const response: LarkImTriggerResponse = {
         accepted: false,
@@ -127,15 +159,72 @@ const handleLarkImTrigger: express.RequestHandler = (req, res, next) => {
       return;
     }
 
+    if (isCancelText(extracted.text)) {
+      const activeTask = findLatestLarkTaskByChat(extracted.chatId, [
+        "waiting_user",
+        "planning",
+        "running"
+      ]);
+
+      if (!activeTask) {
+        const response: LarkImTriggerResponse = {
+          accepted: false,
+          ignored: true,
+          reason: "no active task to cancel",
+          trigger
+        };
+        res.json(response);
+        return;
+      }
+
+      void orchestrator.cancelTask(activeTask.id, extracted.text);
+      if (extracted.messageId) {
+        handledLarkMessages.add(extracted.messageId, activeTask.id);
+      }
+
+      const response: LarkImTriggerResponse = {
+        accepted: true,
+        ignored: false,
+        reason: "cancelled active task",
+        task: store.getTask(activeTask.id) ?? activeTask,
+        trigger
+      };
+      res.status(202).json(response);
+      return;
+    }
+
+    if (isProgressText(extracted.text)) {
+      const latestTask = findLatestLarkTaskByChat(extracted.chatId);
+
+      if (!latestTask) {
+        const response: LarkImTriggerResponse = {
+          accepted: false,
+          ignored: true,
+          reason: "no task found for progress",
+          trigger
+        };
+        res.json(response);
+        return;
+      }
+
+      void orchestrator.reportTaskProgress(latestTask.id, extracted.text);
+      if (extracted.messageId) {
+        handledLarkMessages.add(extracted.messageId, latestTask.id);
+      }
+
+      const response: LarkImTriggerResponse = {
+        accepted: true,
+        ignored: false,
+        reason: "reported task progress",
+        task: latestTask,
+        trigger
+      };
+      res.status(202).json(response);
+      return;
+    }
+
     if (isConfirmationText(extracted.text)) {
-      const waitingTask = store
-        .listTasks()
-        .find(
-          (task) =>
-            task.status === "waiting_user" &&
-            task.trigger?.source === "lark-im" &&
-            task.trigger?.chatId === extracted.chatId
-        );
+      const waitingTask = findLatestLarkTaskByChat(extracted.chatId, ["waiting_user"]);
 
       if (!waitingTask) {
         const response: LarkImTriggerResponse = {
@@ -150,7 +239,7 @@ const handleLarkImTrigger: express.RequestHandler = (req, res, next) => {
 
       const task = orchestrator.confirmTask(waitingTask.id, extracted.text) ?? waitingTask;
       if (extracted.messageId) {
-        handledLarkMessages.set(extracted.messageId, task.id);
+        handledLarkMessages.add(extracted.messageId, task.id);
       }
 
       const response: LarkImTriggerResponse = {
@@ -175,6 +264,24 @@ const handleLarkImTrigger: express.RequestHandler = (req, res, next) => {
       return;
     }
 
+    const activeSession = findLatestLarkTaskByChat(extracted.chatId, [
+      "created",
+      "planning",
+      "waiting_user",
+      "running"
+    ]);
+    if (activeSession) {
+      const response: LarkImTriggerResponse = {
+        accepted: false,
+        ignored: true,
+        reason: "chat session already active",
+        task: activeSession,
+        trigger
+      };
+      res.json(response);
+      return;
+    }
+
     const intent = sanitizeIntent(extracted.text);
     const task = orchestrator.createTask({
       intent:
@@ -184,7 +291,7 @@ const handleLarkImTrigger: express.RequestHandler = (req, res, next) => {
       trigger
     });
     if (extracted.messageId) {
-      handledLarkMessages.set(extracted.messageId, task.id);
+      handledLarkMessages.add(extracted.messageId, task.id);
     }
 
     const response: LarkImTriggerResponse = {
@@ -198,6 +305,19 @@ const handleLarkImTrigger: express.RequestHandler = (req, res, next) => {
     next(error);
   }
 };
+
+function findLatestLarkTaskByChat(chatId: string | undefined, statuses?: TaskStatus[]) {
+  if (!chatId) return undefined;
+
+  return store
+    .listTasks()
+    .find(
+      (task): task is Task =>
+        task.trigger?.source === "lark-im" &&
+        task.trigger?.chatId === chatId &&
+        (!statuses || statuses.includes(task.status))
+    );
+}
 
 app.post("/api/lark/events", handleLarkImTrigger);
 app.post("/api/triggers/lark-im", handleLarkImTrigger);

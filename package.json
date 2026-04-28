@@ -9,7 +9,7 @@
   ],
   "scripts": {
     "dev": "concurrently -k -n api,web -c cyan,magenta \"npm run dev -w @agent-pilot/api\" \"npm run dev -w @agent-pilot/web\"",
-    "dev:e2e": "cross-env AGENT_LLM_MODE=mock OFFICE_ADAPTER=mock npm run dev",
+    "dev:e2e": "cross-env AGENT_LLM_MODE=mock OFFICE_ADAPTER=mock LARK_STATE_PATH=:memory: npm run dev",
     "dev:api": "npm run dev -w @agent-pilot/api",
     "dev:web": "npm run dev -w @agent-pilot/web",
     "build": "npm run build --workspaces",
