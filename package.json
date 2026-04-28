@@ -12,6 +12,7 @@
     "dev:e2e": "cross-env AGENT_LLM_MODE=mock OFFICE_ADAPTER=mock LARK_STATE_PATH=:memory: npm run dev",
     "dev:api": "npm run dev -w @agent-pilot/api",
     "dev:web": "npm run dev -w @agent-pilot/web",
+    "dev:lark-events": "node scripts/lark-event-bridge.mjs",
     "build": "npm run build --workspaces",
     "typecheck": "npm run typecheck --workspaces",
     "test:e2e": "playwright test"
