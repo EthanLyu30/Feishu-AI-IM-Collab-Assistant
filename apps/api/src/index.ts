@@ -16,7 +16,12 @@ import { AgentOrchestrator } from "./agent/AgentOrchestrator";
 import { config } from "./env";
 import { createLlm } from "./llm/createLlm";
 import { attachRealtime } from "./realtime";
-import { validateLarkMessage, validateLarkVerifyToken } from "./security/LarkEventGuard";
+import {
+  validateLarkMessage,
+  validateLarkSignature,
+  validateLarkVerifyToken,
+  type RawBodyRequest
+} from "./security/LarkEventGuard";
 import { HandledMessageStore } from "./state/HandledMessageStore";
 import { TaskStore } from "./state/TaskStore";
 import {
@@ -54,6 +59,12 @@ const larkImTriggerSchema = z
     sender: z.string().optional(),
     text: z.string().optional(),
     senderType: z.string().optional(),
+    header: z
+      .object({
+        token: z.string().optional()
+      })
+      .passthrough()
+      .optional(),
     event: z.unknown().optional(),
     token: z.string().optional(),
     verification_token: z.string().optional(),
@@ -72,7 +83,14 @@ const handledLarkMessages = new HandledMessageStore(config.larkStatePath);
 attachRealtime(server, store);
 
 app.use(cors());
-app.use(express.json({ limit: "1mb" }));
+app.use(
+  express.json({
+    limit: "1mb",
+    verify: (req, _res, buffer) => {
+      (req as RawBodyRequest).rawBody = Buffer.from(buffer);
+    }
+  })
+);
 
 app.get("/health", (_req, res) => {
   res.json({ ok: true, llm: llm.mode, officeAdapter: office.name });
@@ -120,6 +138,17 @@ const handleLarkImTrigger: express.RequestHandler = (req, res, next) => {
         reason: verifyDecision.reason ?? "lark verification failed"
       };
       res.status(verifyDecision.status ?? 403).json(response);
+      return;
+    }
+
+    const signatureDecision = validateLarkSignature(req as RawBodyRequest, input);
+    if (!signatureDecision.allowed) {
+      const response: LarkImTriggerResponse = {
+        accepted: false,
+        ignored: true,
+        reason: signatureDecision.reason ?? "lark signature verification failed"
+      };
+      res.status(signatureDecision.status ?? 403).json(response);
       return;
     }
 

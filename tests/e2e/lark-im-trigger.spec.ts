@@ -1,4 +1,6 @@
 import { expect, test } from "@playwright/test";
+import { createHash } from "node:crypto";
+import { calculateLarkSignature } from "../../apps/api/src/security/LarkEventGuard";
 
 test.describe("Lark IM trigger API", () => {
   test("handles challenge and ignores non-trigger messages", async ({ request }) => {
@@ -291,5 +293,26 @@ test.describe("Lark IM trigger API", () => {
         sender: "ou_user"
       }
     });
+  });
+
+  test("documents the Lark raw body signature algorithm", () => {
+    const timestamp = "1714272000";
+    const nonce = "nonce-for-test";
+    const encryptKey = "encrypt-key-for-test";
+    const rawBody = JSON.stringify({
+      event: {
+        message: {
+          chat_id: "oc_signature",
+          message_id: "om_signature",
+          content: JSON.stringify({ text: "/agent 请整理需求。" })
+        }
+      }
+    });
+
+    const expected = createHash("sha256")
+      .update(`${timestamp}${nonce}${encryptKey}${rawBody}`)
+      .digest("hex");
+
+    expect(calculateLarkSignature({ timestamp, nonce, encryptKey, rawBody })).toBe(expected);
   });
 });
