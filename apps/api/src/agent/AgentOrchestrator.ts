@@ -1,4 +1,4 @@
-import type { Artifact, TaskSource, TaskTrigger } from "@agent-pilot/shared";
+import type { AgentPlan, Artifact, Task, TaskSource, TaskTrigger } from "@agent-pilot/shared";
 import type { OfficeToolAdapter } from "../adapters/OfficeToolAdapter";
 import type { AgentLlm } from "../llm/AgentLlm";
 import { TaskStore } from "../state/TaskStore";
@@ -72,6 +72,20 @@ export class AgentOrchestrator {
     return this.store.getTask(taskId);
   }
 
+  confirmTask(taskId: string, command = "确认执行") {
+    const task = this.store.getTask(taskId);
+    if (!task) throw new Error("Task not found.");
+    if (task.status !== "waiting_user") {
+      throw new Error("Task is not waiting for confirmation.");
+    }
+
+    this.store.emit(taskId, "user.commanded", { command, kind: "confirmation" });
+    this.store.emit(taskId, "task.confirmed", { command });
+    this.store.setStatus(taskId, "running");
+    void this.executePlannedTask(taskId);
+    return this.store.getTask(taskId);
+  }
+
   private async runTask(taskId: string) {
     try {
       this.store.setStatus(taskId, "planning");
@@ -82,7 +96,29 @@ export class AgentOrchestrator {
       const context = await this.office.readMessages(task.trigger?.chatId);
       const plan = await this.planner.plan(task.userIntent, context);
       this.store.setPlan(taskId, plan);
+
+      if (task.trigger?.source === "lark-im") {
+        await this.requestConfirmation(taskId, task, plan);
+        return;
+      }
+
+      await this.executePlannedTask(taskId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      this.store.setStatus(taskId, "failed", message);
+      this.store.emit(taskId, "task.failed", { message });
+    }
+  }
+
+  private async executePlannedTask(taskId: string) {
+    try {
+      const task = this.store.getTask(taskId);
+      if (!task) throw new Error("Task not found.");
+      const plan = task.plan;
+      if (!plan) throw new Error("Task plan is required before execution.");
+
       this.store.setStatus(taskId, "running");
+      const context = await this.office.readMessages(task.trigger?.chatId);
 
       let docArtifact: Artifact | undefined;
       let slidesArtifact: Artifact | undefined;
@@ -166,6 +202,7 @@ export class AgentOrchestrator {
           if (this.office.sendMessage) {
             try {
               await this.office.sendMessage({
+                chatId: currentTask?.trigger?.chatId,
                 markdown: this.buildDeliveryMarkdown(currentArtifacts, summary)
               });
             } catch (error) {
@@ -197,6 +234,29 @@ export class AgentOrchestrator {
     }
   }
 
+  private async requestConfirmation(taskId: string, task: Task, plan: AgentPlan) {
+    const markdown = this.buildConfirmationMarkdown(plan);
+    this.store.setStatus(taskId, "waiting_user");
+    this.store.emit(taskId, "task.waiting_confirmation", {
+      chatId: task.trigger?.chatId,
+      requiredConfirmations: plan.requiredConfirmations,
+      message: markdown
+    });
+
+    if (!this.office.sendMessage) return;
+
+    try {
+      await this.office.sendMessage({
+        chatId: task.trigger?.chatId,
+        markdown
+      });
+    } catch (error) {
+      this.store.emit(taskId, "integration.warning", {
+        message: error instanceof Error ? error.message : "Failed to send Lark confirmation message."
+      });
+    }
+  }
+
   private titleFromIntent(intent: string) {
     return intent.length > 28 ? `${intent.slice(0, 28)}...` : intent;
   }
@@ -208,5 +268,27 @@ export class AgentOrchestrator {
       .join("\n");
 
     return `## Agent-Pilot 任务交付\n\n${links || "- 暂无可打开链接"}\n\n交付摘要：${summary.title}`;
+  }
+
+  private buildConfirmationMarkdown(plan: AgentPlan) {
+    const steps = plan.steps.map((step, index) => `${index + 1}. ${step.title}`).join("\n");
+    const confirmations =
+      plan.requiredConfirmations.length > 0
+        ? plan.requiredConfirmations.map((item) => `- ${item}`).join("\n")
+        : "- 确认开始生成飞书 Docs、Slides 和交付摘要";
+
+    return [
+      "Agent-Pilot 已完成任务规划，等待确认后继续执行。",
+      "",
+      `目标：${plan.goal}`,
+      "",
+      "执行步骤：",
+      steps,
+      "",
+      "需要你确认：",
+      confirmations,
+      "",
+      "请在群里回复“确认”或“继续”，我就开始生成正式交付物。"
+    ].join("\n");
   }
 }

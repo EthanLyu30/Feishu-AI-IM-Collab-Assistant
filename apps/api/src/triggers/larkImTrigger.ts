@@ -50,6 +50,27 @@ export function shouldTriggerAgent(text: string) {
   );
 }
 
+export function isConfirmationText(text: string) {
+  const normalized = text.trim().replace(/\s+/g, "").toLocaleLowerCase();
+  if (!normalized) return false;
+  if (["取消", "停止", "不确认", "不用", "不要"].some((keyword) => normalized.includes(keyword))) {
+    return false;
+  }
+
+  return [
+    "确认",
+    "确认执行",
+    "继续",
+    "继续执行",
+    "开始",
+    "开始生成",
+    "同意",
+    "批准",
+    "approve",
+    "/approve"
+  ].some((keyword) => normalized.includes(keyword));
+}
+
 export function sanitizeIntent(text: string) {
   return text
     .replace(/@Agent-Pilot/gi, "")

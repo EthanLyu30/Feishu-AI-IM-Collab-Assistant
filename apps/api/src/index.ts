@@ -18,6 +18,7 @@ import { TaskStore } from "./state/TaskStore";
 import {
   buildTaskTrigger,
   extractLarkImTrigger,
+  isConfirmationText,
   sanitizeIntent,
   shouldTriggerAgent
 } from "./triggers/larkImTrigger";
@@ -99,61 +100,103 @@ app.post("/api/tasks", (req, res) => {
   res.status(202).json({ task });
 });
 
-const handleLarkImTrigger: express.RequestHandler = (req, res) => {
-  const input = larkImTriggerSchema.parse(req.body);
-  if (input.challenge) {
+const handleLarkImTrigger: express.RequestHandler = (req, res, next) => {
+  try {
+    const input = larkImTriggerSchema.parse(req.body);
+    if (input.challenge) {
+      const response: LarkImTriggerResponse = {
+        accepted: false,
+        ignored: true,
+        challenge: input.challenge,
+        reason: "lark.challenge"
+      };
+      res.json(response);
+      return;
+    }
+
+    const extracted = extractLarkImTrigger(input);
+    const trigger = buildTaskTrigger(extracted);
+    if (extracted.messageId && handledLarkMessages.has(extracted.messageId)) {
+      const response: LarkImTriggerResponse = {
+        accepted: false,
+        ignored: true,
+        reason: "duplicate message ignored",
+        trigger
+      };
+      res.json(response);
+      return;
+    }
+
+    if (isConfirmationText(extracted.text)) {
+      const waitingTask = store
+        .listTasks()
+        .find(
+          (task) =>
+            task.status === "waiting_user" &&
+            task.trigger?.source === "lark-im" &&
+            task.trigger?.chatId === extracted.chatId
+        );
+
+      if (!waitingTask) {
+        const response: LarkImTriggerResponse = {
+          accepted: false,
+          ignored: true,
+          reason: "no waiting task to confirm",
+          trigger
+        };
+        res.json(response);
+        return;
+      }
+
+      const task = orchestrator.confirmTask(waitingTask.id, extracted.text) ?? waitingTask;
+      if (extracted.messageId) {
+        handledLarkMessages.set(extracted.messageId, task.id);
+      }
+
+      const response: LarkImTriggerResponse = {
+        accepted: true,
+        ignored: false,
+        reason: "confirmed waiting task",
+        task,
+        trigger
+      };
+      res.status(202).json(response);
+      return;
+    }
+
+    if (!shouldTriggerAgent(extracted.text)) {
+      const response: LarkImTriggerResponse = {
+        accepted: false,
+        ignored: true,
+        reason: "message does not match agent trigger keywords",
+        trigger
+      };
+      res.json(response);
+      return;
+    }
+
+    const intent = sanitizeIntent(extracted.text);
+    const task = orchestrator.createTask({
+      intent:
+        intent ||
+        "请读取当前飞书群最近讨论，整理正式需求文档，生成汇报 Slides 和 3 分钟讲稿，并把交付摘要回发到群里。",
+      source: "im",
+      trigger
+    });
+    if (extracted.messageId) {
+      handledLarkMessages.set(extracted.messageId, task.id);
+    }
+
     const response: LarkImTriggerResponse = {
-      accepted: false,
-      ignored: true,
-      challenge: input.challenge,
-      reason: "lark.challenge"
+      accepted: true,
+      ignored: false,
+      task,
+      trigger: task.trigger
     };
-    res.json(response);
-    return;
+    res.status(202).json(response);
+  } catch (error) {
+    next(error);
   }
-
-  const extracted = extractLarkImTrigger(input);
-  if (!shouldTriggerAgent(extracted.text)) {
-    const response: LarkImTriggerResponse = {
-      accepted: false,
-      ignored: true,
-      reason: "message does not match agent trigger keywords",
-      trigger: buildTaskTrigger(extracted)
-    };
-    res.json(response);
-    return;
-  }
-
-  if (extracted.messageId && handledLarkMessages.has(extracted.messageId)) {
-    const response: LarkImTriggerResponse = {
-      accepted: false,
-      ignored: true,
-      reason: "duplicate message ignored",
-      trigger: buildTaskTrigger(extracted)
-    };
-    res.json(response);
-    return;
-  }
-
-  const intent = sanitizeIntent(extracted.text);
-  const task = orchestrator.createTask({
-    intent:
-      intent ||
-      "请读取当前飞书群最近讨论，整理正式需求文档，生成汇报 Slides 和 3 分钟讲稿，并把交付摘要回发到群里。",
-    source: "im",
-    trigger: buildTaskTrigger(extracted)
-  });
-  if (extracted.messageId) {
-    handledLarkMessages.set(extracted.messageId, task.id);
-  }
-
-  const response: LarkImTriggerResponse = {
-    accepted: true,
-    ignored: false,
-    task,
-    trigger: task.trigger
-  };
-  res.status(202).json(response);
 };
 
 app.post("/api/lark/events", handleLarkImTrigger);

@@ -18,6 +18,8 @@ export type AgentEventType =
   | "task.created"
   | "task.updated"
   | "task.planned"
+  | "task.waiting_confirmation"
+  | "task.confirmed"
   | "step.started"
   | "step.completed"
   | "artifact.created"

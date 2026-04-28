@@ -74,6 +74,29 @@ test.describe("Lark IM trigger API", () => {
         const taskBody = await taskResponse.json();
         return taskBody.task.status;
       }, { timeout: 12_000 })
+      .toBe("waiting_user");
+
+    const confirm = await request.post("/api/triggers/lark-im", {
+      data: {
+        chatId: "oc_test",
+        messageId: "om_confirm",
+        sender: "ou_user",
+        text: "确认"
+      }
+    });
+    expect(confirm.status()).toBe(202);
+    expect(await confirm.json()).toMatchObject({
+      accepted: true,
+      ignored: false,
+      reason: "confirmed waiting task"
+    });
+
+    await expect
+      .poll(async () => {
+        const taskResponse = await request.get(`/api/tasks/${body.task.id}`);
+        const taskBody = await taskResponse.json();
+        return taskBody.task.status;
+      }, { timeout: 12_000 })
       .toBe("completed");
 
     const taskResponse = await request.get(`/api/tasks/${body.task.id}`);
@@ -114,6 +137,14 @@ test.describe("Lark IM trigger API", () => {
         sender: "ou_event"
       }
     });
+
+    await expect
+      .poll(async () => {
+        const taskResponse = await request.get(`/api/tasks/${body.task.id}`);
+        const taskBody = await taskResponse.json();
+        return taskBody.task.status;
+      }, { timeout: 12_000 })
+      .toBe("waiting_user");
   });
 
   test("ignores duplicate message ids", async ({ request }) => {

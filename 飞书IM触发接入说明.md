@@ -1,6 +1,6 @@
 # 飞书 IM 触发接入说明
 
-更新时间：2026.04.27
+更新时间：2026.04.28
 
 ## 1. 当前能力
 
@@ -21,6 +21,8 @@ POST /api/lark/events
 - 关键词触发：`@Agent`、`@Agent-Pilot`、`/agent`、`Agent-Pilot`、`请整理`、`生成需求文档`、`生成汇报`、`生成 PPT`。
 - 同一个 `messageId` 幂等去重，避免重复事件导致重复生成文档和 Slides。
 - 任务会记录 `trigger.source = lark-im`，并保留 `chatId`、`messageId`、`sender`、`rawText`。
+- 群内触发后会先进入 `waiting_user` 状态，并在同一群聊等待用户回复“确认 / 继续 / 开始生成”等短指令。
+- 用户确认后，Agent 才继续执行 Docs、Slides、讲稿和交付摘要生成。
 
 ## 2. 本地模拟
 
@@ -57,6 +59,21 @@ Invoke-RestMethod `
     messageId = "om_trigger"
     sender = "ou_user"
     text = "@Agent 请整理群聊讨论，生成需求文档和汇报 Slides。"
+  } | ConvertTo-Json)
+```
+
+此时任务会先停在 `waiting_user`，再发送确认消息：
+
+```powershell
+Invoke-RestMethod `
+  -Method Post `
+  -Uri "http://localhost:8787/api/triggers/lark-im" `
+  -ContentType "application/json" `
+  -Body (@{
+    chatId = "oc_test"
+    messageId = "om_confirm"
+    sender = "ou_user"
+    text = "确认"
   } | ConvertTo-Json)
 ```
 
@@ -112,7 +129,7 @@ https://你的域名/api/lark/events
 - 还没有实现飞书事件签名校验。
 - 还没有过滤机器人自己发送的消息。
 - 还没有任务持久化，进程重启后幂等记录会丢失。
-- 还没有“确认 / 修改 / 继续执行”的暂停恢复状态机。
+- 已有最小“确认 / 继续执行”状态机，但还没有取消、改计划、多人审批和超时恢复。
 - 当前 Web 仪表盘仍是开发期页面，后续需要包装成飞书应用内页面。
 
 ## 5. 验证命令
@@ -128,5 +145,6 @@ npm run test:e2e
 - challenge 回调。
 - 普通消息忽略。
 - 扁平 payload 创建任务。
+- 群内确认消息继续执行任务。
 - 飞书事件形状 payload 创建任务。
 - 重复 `messageId` 幂等忽略。
