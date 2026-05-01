@@ -439,9 +439,9 @@ function ReadinessPanel({ readiness }: { readiness: ReadinessStatus | null }) {
       <div className="readinessList">
         {topChecks.map((check) => (
           <div className={`readinessItem ${check.ok ? "good" : "warn"}`} key={check.id} title={check.detail}>
-            <span>{check.ok ? "通过" : "待补"}</span>
+            <span>{check.ok ? "通过" : check.required ? "必补" : "建议"}</span>
             <div>
-              <strong>{check.label}</strong>
+              <strong>{check.label}{check.required ? "" : "（建议）"}</strong>
               <p>{check.detail}</p>
             </div>
           </div>

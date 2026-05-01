@@ -145,6 +145,7 @@ export interface ReadinessCheck {
   id: string;
   label: string;
   ok: boolean;
+  required: boolean;
   detail: string;
 }
 

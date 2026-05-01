@@ -18,9 +18,9 @@ test.describe("Lark IM trigger API", () => {
     expect(await readiness.json()).toMatchObject({
       ok: false,
       checks: expect.arrayContaining([
-        expect.objectContaining({ id: "llm", ok: false }),
-        expect.objectContaining({ id: "office", ok: false }),
-        expect.objectContaining({ id: "state", ok: false })
+        expect.objectContaining({ id: "llm", ok: false, required: true }),
+        expect.objectContaining({ id: "office", ok: false, required: true }),
+        expect.objectContaining({ id: "state", ok: false, required: true })
       ])
     });
 

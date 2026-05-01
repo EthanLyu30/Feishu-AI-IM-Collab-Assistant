@@ -3,7 +3,8 @@ const proxyHeaders = {
   "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
   "Access-Control-Allow-Headers":
     "Content-Type,Authorization,X-Lark-Request-Timestamp,X-Lark-Request-Nonce,X-Lark-Signature",
-  "Access-Control-Max-Age": "86400"
+  "Access-Control-Max-Age": "86400",
+  "Cache-Control": "no-store"
 };
 
 export default {

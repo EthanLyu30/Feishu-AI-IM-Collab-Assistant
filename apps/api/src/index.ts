@@ -85,6 +85,12 @@ const startedAt = Date.now();
 attachRealtime(server, store);
 
 app.use(cors());
+app.use((req, res, next) => {
+  if (req.path === "/health" || req.path.startsWith("/api/")) {
+    res.setHeader("Cache-Control", "no-store");
+  }
+  next();
+});
 app.use(
   express.json({
     limit: "1mb",
@@ -116,6 +122,7 @@ app.get("/api/readiness", (_req, res) => {
       id: "llm",
       label: "豆包 2.0 Pro",
       ok: llm.mode === "doubao" && config.useDoubao,
+      required: true,
       detail:
         llm.mode === "doubao" && config.useDoubao
           ? "已配置 Ark endpoint 和 API key。"
@@ -125,18 +132,21 @@ app.get("/api/readiness", (_req, res) => {
       id: "office",
       label: "飞书 Office Adapter",
       ok: office.name === "lark-cli",
+      required: true,
       detail: office.name === "lark-cli" ? "已使用 lark-cli 创建 Docs / Slides / 群回发。" : "当前使用 mock adapter。"
     },
     {
       id: "chat",
       label: "默认测试群",
       ok: Boolean(config.larkDefaultChatId),
+      required: true,
       detail: config.larkDefaultChatId ? "已配置默认测试群。" : "未配置 LARK_DEFAULT_CHAT_ID。"
     },
     {
       id: "allowed-chats",
       label: "群白名单",
       ok: config.larkAllowedChatIds.length > 0,
+      required: false,
       detail: config.larkAllowedChatIds.length
         ? `已限制 ${config.larkAllowedChatIds.length} 个允许触发的群。`
         : "未配置 LARK_ALLOWED_CHAT_IDS，真实演示前建议限制测试群。"
@@ -145,6 +155,7 @@ app.get("/api/readiness", (_req, res) => {
       id: "bot-filter",
       label: "机器人自消息过滤",
       ok: Boolean(config.larkBotOpenId || config.larkBotUserId),
+      required: false,
       detail: config.larkBotOpenId || config.larkBotUserId
         ? "已配置机器人身份过滤。"
         : "未配置 LARK_BOT_OPEN_ID / LARK_BOT_USER_ID，仅依赖 senderType 过滤。"
@@ -153,6 +164,7 @@ app.get("/api/readiness", (_req, res) => {
       id: "event-security",
       label: "事件安全",
       ok: Boolean(config.larkEventVerifyToken || config.larkEventEncryptKey),
+      required: false,
       detail: config.larkEventVerifyToken || config.larkEventEncryptKey
         ? "已配置 verify token 或 encrypt key。"
         : "长连接本地演示可运行；若切 webhook，必须配置签名或 token。"
@@ -161,6 +173,7 @@ app.get("/api/readiness", (_req, res) => {
       id: "state",
       label: "幂等状态",
       ok: config.larkStatePath !== ":memory:",
+      required: true,
       detail:
         config.larkStatePath === ":memory:"
           ? "当前幂等记录为内存模式，重启后会丢失。"
@@ -169,7 +182,7 @@ app.get("/api/readiness", (_req, res) => {
   ];
 
   const readiness: ReadinessStatus = {
-    ok: checks.every((check) => check.ok),
+    ok: checks.filter((check) => check.required).every((check) => check.ok),
     checkedAt: new Date().toISOString(),
     uptimeSeconds: Math.floor((Date.now() - startedAt) / 1000),
     publicApiBaseUrl: config.publicApiBaseUrl,
