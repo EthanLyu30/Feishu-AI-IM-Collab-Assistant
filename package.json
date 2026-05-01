@@ -9,7 +9,7 @@
   ],
   "scripts": {
     "dev": "concurrently -k -n api,web -c cyan,magenta \"npm run dev -w @agent-pilot/api\" \"npm run dev -w @agent-pilot/web\"",
-    "dev:e2e": "cross-env AGENT_LLM_MODE=mock OFFICE_ADAPTER=mock LARK_STATE_PATH=:memory: ENABLE_TEST_ENDPOINTS=true API_PORT=18878 VITE_PROXY_API_ORIGIN=http://localhost:18878 concurrently -k -n api,web -c cyan,magenta \"npm run dev -w @agent-pilot/api\" \"npm run dev:e2e -w @agent-pilot/web\"",
+    "dev:e2e": "cross-env AGENT_LLM_MODE=mock OFFICE_ADAPTER=mock LARK_STATE_PATH=:memory: TASK_STATE_PATH=:memory: ENABLE_TEST_ENDPOINTS=true API_PORT=18878 VITE_PROXY_API_ORIGIN=http://localhost:18878 concurrently -k -n api,web -c cyan,magenta \"npm run dev -w @agent-pilot/api\" \"npm run dev:e2e -w @agent-pilot/web\"",
     "dev:api": "npm run dev -w @agent-pilot/api",
     "dev:web": "npm run dev -w @agent-pilot/web",
     "dev:lark-events": "node scripts/lark-event-bridge.mjs",
@@ -21,7 +21,7 @@
     "doctor:deploy": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/doctor-deployment.ps1",
     "doctor:stable-api": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/doctor-stable-api.ps1",
     "build:web": "npm run build -w @agent-pilot/web",
-    "deploy:web:cloudflare": "npm run build:web && npx wrangler pages deploy apps/web/dist --project-name feishu-ai-im-collab-assistant",
+    "deploy:web:cloudflare": "npm run build:web && npx --yes wrangler@4.87.0 pages deploy apps/web/dist --project-name feishu-ai-im-collab-assistant",
     "build": "npm run build --workspaces",
     "typecheck": "npm run typecheck --workspaces",
     "test:e2e": "playwright test"

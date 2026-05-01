@@ -6,15 +6,15 @@ param(
 $ErrorActionPreference = "Continue"
 
 Write-Host "== Cloudflare auth =="
-npx wrangler whoami
+npx --yes wrangler@4.87.0 whoami
 
 Write-Host ""
 Write-Host "== Cloudflare Pages project =="
-npx wrangler pages project list
+npx --yes wrangler@4.87.0 pages project list
 
 Write-Host ""
 Write-Host "== Recent deployments =="
-npx wrangler pages deployment list --project-name $ProjectName
+npx --yes wrangler@4.87.0 pages deployment list --project-name $ProjectName
 
 Write-Host ""
 Write-Host "== HTTP reachability =="

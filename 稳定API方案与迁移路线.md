@@ -10,13 +10,29 @@
 https://feishu-ai-im-collab-assistant.pages.dev
 ```
 
-当前 API 暴露方式是 Cloudflare Quick Tunnel：
+当前 API 暴露有三层：
+
+1. 已部署的 Cloudflare Pages 边缘代理，固定入口为 Pages 域名。
+2. 当前开发期 Quick Tunnel，用于把本机 `http://localhost:8787` 临时暴露出去。
+3. 已创建但尚未绑定域名的 Cloudflare Named Tunnel。
+
+当前 Quick Tunnel：
 
 ```text
 https://*.trycloudflare.com
 ```
 
 Quick Tunnel 适合开发和比赛现场临时演示，但不是稳定 API。进程停止、电脑重启或重新启动 Tunnel 后，URL 可能变化。
+
+当前已创建 Named Tunnel：
+
+```text
+Tunnel Name: feishu-agent-api
+Tunnel ID: c8a7da53-a5b0-46c5-8182-425dea10df19
+Status: inactive
+```
+
+`inactive` 的原因不是创建失败，而是还没有为它配置 public hostname，且本机没有启动稳定 tunnel connector。下一步需要把一个域名，例如 `api.your-domain.com`，绑定到该 tunnel，并指向本地服务 `http://localhost:8787`。
 
 ## 2. 为什么不能直接把 trycloudflare 当稳定 API
 
@@ -129,26 +145,38 @@ https://feishu-ai-im-collab-assistant.pages.dev/?api=https://api.your-domain.com
 需要你手工准备：
 
 1. 一个域名，并把 DNS 接入 Cloudflare。
-2. 在 Cloudflare Zero Trust 里创建 Named Tunnel，或运行 `cloudflared tunnel login` 完成浏览器授权。
+2. 在 Cloudflare Zero Trust 里给已创建的 `feishu-agent-api` 配置 public hostname。
+3. 让 public hostname 指向本地服务 `http://localhost:8787`。
+4. 如果选择 token 运行方式，把 Cloudflare 后台生成的 tunnel token 写入本机 `.env.local`。
+
+推荐后台填写：
+
+```text
+Cloudflare Zero Trust -> Networks -> Tunnels -> feishu-agent-api
+Public Hostname:
+  Subdomain: api
+  Domain: your-domain.com
+  Service Type: HTTP
+  URL: localhost:8787
+```
 
 接入后可运行的命令形态：
 
 ```powershell
-cloudflared tunnel create feishu-agent-api
-cloudflared tunnel route dns feishu-agent-api api.your-domain.com
-cloudflared tunnel run feishu-agent-api
+npm run stable:stack
+npm run doctor:stable-api
 ```
 
-对应 ingress：
+`.env.local` 推荐写法：
 
-```yaml
-tunnel: feishu-agent-api
-credentials-file: C:\Users\<you>\.cloudflared\<tunnel-id>.json
+```env
+PUBLIC_API_BASE_URL=https://api.your-domain.com
+PUBLIC_WEB_BASE_URL=https://feishu-ai-im-collab-assistant.pages.dev
 
-ingress:
-  - hostname: api.your-domain.com
-    service: http://localhost:8787
-  - service: http_status:404
+# 二选一。推荐 token，适合不用本机 origin cert 的方式。
+CLOUDFLARE_TUNNEL_TOKEN=从 Zero Trust Tunnel 页面复制
+# 或
+CLOUDFLARE_TUNNEL_NAME=feishu-agent-api
 ```
 
 优点：
@@ -189,8 +217,9 @@ npm run doctor:stable-api
 
 适合部署目标：
 
-- 轻量云服务器。
-- Cloudflare Tunnel 指向一台固定服务器。
+- 轻量云服务器，推荐 2 vCPU / 4 GB RAM / 60 GB SSD，Ubuntu 22.04 或 24.04。
+- 最低可用规格为 2 vCPU / 2 GB RAM / 40 GB SSD，但长连接、Node 构建、日志和后续数据库会比较紧。
+- Cloudflare Tunnel 指向一台固定服务器，或服务器直接使用 Nginx + HTTPS。
 - 支持 Node.js 长进程的容器服务。
 
 需要迁移：
@@ -198,16 +227,29 @@ npm run doctor:stable-api
 - `.env` 中的 Ark / Lark 配置。
 - `lark-cli` 登录态或改用飞书 OpenAPI SDK。
 - 本地 `.tmp`、`.data` 迁移到持久磁盘或数据库。
+- 使用 PM2 或 systemd 常驻运行 `npm run dev:api` 和 `npm run dev:lark-events`。
+- 使用 `npm run doctor:stable-api` 做上线前检查。
 
 优点：
 
 - 更稳定。
 - 比赛评委远程打开也可用。
+- 不依赖你本机网络和电脑电源。
 
 缺点：
 
 - 运维成本更高。
 - 需要更严格的密钥管理。
+- `lark-cli` 用户态登录搬到服务器会增加一次授权和运维复杂度。
+
+当前建议：
+
+| 方案 | 适合阶段 | 结论 |
+| --- | --- | --- |
+| Pages 边缘代理 + Quick Tunnel | 现在立即演示 | 可继续用，但本机和 Quick Tunnel 要保持运行 |
+| Named Tunnel + 自有域名 | 比赛提交前优先 | 最贴合当前架构，API URL 稳定，改动小 |
+| 云服务器 + Cloudflare Tunnel | 评委远程长期体验 | 最稳，但需要购买服务器和迁移登录态 |
+| 全云 Worker / Durable Object | 长期产品化 | 架构漂亮，但当前改造成本最大 |
 
 ## 5. 长期方案 C：Webhook + Cloudflare Worker / Durable Object
 

@@ -3,12 +3,14 @@ import type { OfficeToolAdapter } from "../adapters/OfficeToolAdapter";
 import type { AgentLlm } from "../llm/AgentLlm";
 import { TaskStore } from "../state/TaskStore";
 import { createId, delay, nowIso } from "../utils/id";
+import { ArtifactVerifier } from "./ArtifactVerifier";
 import { ContentComposer } from "./ContentComposer";
 import { Planner } from "./Planner";
 
 export class AgentOrchestrator {
   private planner: Planner;
   private composer: ContentComposer;
+  private verifier = new ArtifactVerifier();
 
   constructor(
     private readonly store: TaskStore,
@@ -62,10 +64,11 @@ export class AgentOrchestrator {
     });
 
     this.store.upsertArtifact(taskId, updatedDoc);
+    const verification = this.verifyArtifact(taskId, updatedDoc);
     this.store.updateStep(taskId, step.id, {
       status: "completed",
       completedAt: nowIso(),
-      outputSummary: "需求文档已根据用户指令完成更新。"
+      outputSummary: `需求文档已根据用户指令完成更新。${verification.summary}`
     });
     this.store.setStatus(taskId, "completed");
 
@@ -198,10 +201,11 @@ export class AgentOrchestrator {
             markdown
           });
           this.store.upsertArtifact(taskId, docArtifact);
+          const verification = this.verifyArtifact(taskId, docArtifact);
           this.store.updateStep(taskId, step.id, {
             status: "completed",
             completedAt: nowIso(),
-            outputSummary: "需求文档已生成。"
+            outputSummary: `需求文档已生成。${verification.summary}`
           });
           continue;
         }
@@ -213,10 +217,11 @@ export class AgentOrchestrator {
             markdown
           });
           this.store.upsertArtifact(taskId, slidesArtifact);
+          const verification = this.verifyArtifact(taskId, slidesArtifact);
           this.store.updateStep(taskId, step.id, {
             status: "completed",
             completedAt: nowIso(),
-            outputSummary: "5 页汇报 PPT 内容已生成。"
+            outputSummary: `5 页汇报 PPT 内容已生成。${verification.summary}`
           });
           continue;
         }
@@ -234,10 +239,11 @@ export class AgentOrchestrator {
             updatedAt: nowIso()
           };
           this.store.upsertArtifact(taskId, rehearsalArtifact);
+          const verification = this.verifyArtifact(taskId, rehearsalArtifact);
           this.store.updateStep(taskId, step.id, {
             status: "completed",
             completedAt: nowIso(),
-            outputSummary: "汇报讲稿和优化建议已生成。"
+            outputSummary: `汇报讲稿和优化建议已生成。${verification.summary}`
           });
           continue;
         }
@@ -252,6 +258,7 @@ export class AgentOrchestrator {
               "本次任务已完成需求文档、演示稿和汇报讲稿生成，后续可接入真实飞书链接。"
           });
           this.store.upsertArtifact(taskId, summary);
+          const verification = this.verifyArtifact(taskId, summary);
           this.store.emit(taskId, "task.delivered", { artifact: summary });
           if (this.office.sendMessage) {
             try {
@@ -268,7 +275,7 @@ export class AgentOrchestrator {
           this.store.updateStep(taskId, step.id, {
             status: "completed",
             completedAt: nowIso(),
-            outputSummary: "交付摘要已生成。"
+            outputSummary: `交付摘要已生成。${verification.summary}`
           });
           continue;
         }
@@ -315,6 +322,26 @@ export class AgentOrchestrator {
 
   private titleFromIntent(intent: string) {
     return intent.length > 28 ? `${intent.slice(0, 28)}...` : intent;
+  }
+
+  private verifyArtifact(taskId: string, artifact: Artifact) {
+    const verification = this.verifier.verify(artifact);
+    this.store.emit(taskId, "artifact.verified", {
+      artifactId: artifact.id,
+      artifactType: artifact.type,
+      ...verification
+    });
+
+    if (verification.warnings.length > 0) {
+      this.store.emit(taskId, "integration.warning", {
+        message: `${artifact.title} 质量校验建议：${verification.warnings.join("；")}`,
+        artifactId: artifact.id,
+        artifactType: artifact.type,
+        warnings: verification.warnings
+      });
+    }
+
+    return verification;
   }
 
   private buildDeliveryMarkdown(artifacts: Artifact[], summary: Artifact) {

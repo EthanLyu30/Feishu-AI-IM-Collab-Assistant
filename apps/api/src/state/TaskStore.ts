@@ -1,4 +1,6 @@
 import { EventEmitter } from "node:events";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import type { AgentEvent, AgentEventType, AgentPlan, AgentStep, Artifact, Task, TaskSource, TaskStatus } from "@agent-pilot/shared";
 import { createId, nowIso } from "../utils/id";
 
@@ -10,6 +12,10 @@ export class TaskStore {
   private tasks = new Map<string, Task>();
   private events: AgentEvent[] = [];
   private emitter = new EventEmitter();
+
+  constructor(private readonly statePath = ":memory:") {
+    this.load();
+  }
 
   onEvent(listener: (event: AgentEvent) => void) {
     this.emitter.on("event", listener);
@@ -31,6 +37,7 @@ export class TaskStore {
   clear() {
     this.tasks.clear();
     this.events = [];
+    this.persist();
   }
 
   createTask(input: { title: string; source: TaskSource; userIntent: string; trigger?: Task["trigger"] }) {
@@ -122,7 +129,53 @@ export class TaskStore {
     };
     this.events.push(event);
     this.emitter.emit("event", event);
+    this.persist();
     return event;
+  }
+
+  private load() {
+    if (!this.shouldPersist() || !existsSync(this.statePath)) {
+      return;
+    }
+
+    try {
+      const raw = readFileSync(this.statePath, "utf-8");
+      if (!raw.trim()) return;
+
+      const snapshot = JSON.parse(raw) as Partial<TaskStoreSnapshot>;
+      const tasks = Array.isArray(snapshot.tasks) ? snapshot.tasks : [];
+      const events = Array.isArray(snapshot.events) ? snapshot.events : [];
+
+      this.tasks = new Map(tasks.map((task) => [task.id, task]));
+      this.events = events;
+    } catch {
+      try {
+        renameSync(this.statePath, `${this.statePath}.corrupt-${Date.now()}`);
+      } catch {
+        // Keep startup resilient even if the corrupt state file cannot be moved.
+      }
+      this.tasks = new Map();
+      this.events = [];
+    }
+  }
+
+  private persist() {
+    if (!this.shouldPersist()) {
+      return;
+    }
+
+    mkdirSync(dirname(this.statePath), { recursive: true });
+    const snapshot: TaskStoreSnapshot = {
+      tasks: this.listTasks(),
+      events: this.events
+    };
+    const tmpPath = `${this.statePath}.tmp`;
+    writeFileSync(tmpPath, JSON.stringify(snapshot, null, 2), "utf-8");
+    renameSync(tmpPath, this.statePath);
+  }
+
+  private shouldPersist() {
+    return this.statePath !== ":memory:";
   }
 
   private requireTask(taskId: string) {
@@ -132,4 +185,9 @@ export class TaskStore {
     }
     return task;
   }
+}
+
+interface TaskStoreSnapshot {
+  tasks: Task[];
+  events: AgentEvent[];
 }

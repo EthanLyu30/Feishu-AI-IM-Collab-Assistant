@@ -75,7 +75,7 @@ const larkImTriggerSchema = z
 
 const app = express();
 const server = createServer(app);
-const store = new TaskStore();
+const store = new TaskStore(config.taskStatePath);
 const llm = createLlm();
 const office = createOfficeAdapter();
 const orchestrator = new AgentOrchestrator(store, llm, office);
@@ -178,6 +178,16 @@ app.get("/api/readiness", (_req, res) => {
         config.larkStatePath === ":memory:"
           ? "当前幂等记录为内存模式，重启后会丢失。"
           : `幂等记录路径：${config.larkStatePath}`
+    },
+    {
+      id: "task-state",
+      label: "任务状态持久化",
+      ok: config.taskStatePath !== ":memory:",
+      required: true,
+      detail:
+        config.taskStatePath === ":memory:"
+          ? "当前任务状态为内存模式，重启后会丢失。"
+          : `任务状态路径：${config.taskStatePath}`
     }
   ];
 

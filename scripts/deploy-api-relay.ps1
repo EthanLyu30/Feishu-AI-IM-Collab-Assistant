@@ -82,7 +82,8 @@ Remove-Item -LiteralPath $deployOut, $deployErr -ErrorAction SilentlyContinue
 
 Write-Host "Deploying $WorkerName with upstream $UpstreamApiUrl"
 $process = Start-Process -FilePath "npx.cmd" -ArgumentList @(
-  "wrangler",
+  "--yes",
+  "wrangler@4.87.0",
   "deploy",
   "--config",
   $wranglerConfig,

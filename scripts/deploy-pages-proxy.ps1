@@ -90,7 +90,7 @@ Set-Content -LiteralPath $secretFile -Value $UpstreamApiUrl -NoNewline -Encoding
 $secretOut = Join-Path $runtimeDir "pages-secret.out.log"
 $secretErr = Join-Path $runtimeDir "pages-secret.err.log"
 Remove-Item -LiteralPath $secretOut, $secretErr -ErrorAction SilentlyContinue
-$secretCommand = "type `"$secretFile`" | npx wrangler pages secret put UPSTREAM_API_BASE_URL --project-name $ProjectName"
+$secretCommand = "type `"$secretFile`" | npx --yes wrangler@4.87.0 pages secret put UPSTREAM_API_BASE_URL --project-name $ProjectName"
 $secretProcess = Start-Process -FilePath "cmd.exe" -ArgumentList @("/c", $secretCommand) -WorkingDirectory $ProjectRoot -WindowStyle Hidden -RedirectStandardOutput $secretOut -RedirectStandardError $secretErr -Wait -PassThru
 if (Test-Path -LiteralPath $secretOut) {
   Get-Content -LiteralPath $secretOut | ForEach-Object { Write-Host $_ }

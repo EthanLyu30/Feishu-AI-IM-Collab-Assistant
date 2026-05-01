@@ -26,6 +26,7 @@ export type AgentEventType =
   | "step.completed"
   | "artifact.created"
   | "artifact.updated"
+  | "artifact.verified"
   | "user.commanded"
   | "task.delivered"
   | "task.failed"

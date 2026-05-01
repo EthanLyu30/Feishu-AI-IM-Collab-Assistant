@@ -9,24 +9,33 @@ import { createId, nowIso } from "../utils/id";
 
 export class LarkCliAdapter implements OfficeToolAdapter {
   name = "lark-cli" as const;
+  private readonly timeoutMs: number;
+  private readonly readRetries: number;
 
   constructor(
     private readonly cliBin: string,
-    private readonly defaultChatId?: string
-  ) {}
+    private readonly defaultChatId?: string,
+    options: LarkCliAdapterOptions = {}
+  ) {
+    this.timeoutMs = options.timeoutMs ?? 45_000;
+    this.readRetries = options.readRetries ?? 1;
+  }
 
   async readMessages(chatId = this.defaultChatId): Promise<MessageContext> {
     if (!chatId) {
       throw new Error("Lark chat_id is required. Set LARK_DEFAULT_CHAT_ID or pass chatId explicitly.");
     }
 
-    const output = await this.run([
-      "im", "+chat-messages-list",
-      "--chat-id", chatId,
-      "--page-size", "20",
-      "--sort", "desc",
-      "--format", "json"
-    ]);
+    const output = await this.run(
+      [
+        "im", "+chat-messages-list",
+        "--chat-id", chatId,
+        "--page-size", "20",
+        "--sort", "desc",
+        "--format", "json"
+      ],
+      { operation: "read chat messages", retries: this.readRetries }
+    );
 
     const payload = this.parseJsonObject(output);
     const messages = payload as {
@@ -242,7 +251,25 @@ export class LarkCliAdapter implements OfficeToolAdapter {
     return undefined;
   }
 
-  private run(args: string[]) {
+  private async run(args: string[], options: RunOptions = {}) {
+    const attempts = (options.retries ?? 0) + 1;
+    let lastError: unknown;
+
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      try {
+        return await this.runOnce(args, options.operation, attempt);
+      } catch (error) {
+        lastError = error;
+        if (attempt < attempts) {
+          await this.wait(300 * attempt);
+        }
+      }
+    }
+
+    throw lastError instanceof Error ? lastError : new Error("lark-cli command failed.");
+  }
+
+  private runOnce(args: string[], operation = "lark-cli command", attempt = 1) {
     return new Promise<string>((resolve, reject) => {
       const command = this.buildCommand(args);
       const child = spawn(command.bin, command.args, {
@@ -252,6 +279,23 @@ export class LarkCliAdapter implements OfficeToolAdapter {
 
       let stdout = "";
       let stderr = "";
+      let settled = false;
+      let timedOut = false;
+      const timer = setTimeout(() => {
+        timedOut = true;
+        child.kill();
+      }, this.timeoutMs);
+
+      const finish = (error: Error | undefined, output?: string) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve(output ?? "");
+      };
 
       child.stdout.on("data", (chunk) => {
         stdout += chunk.toString();
@@ -259,15 +303,31 @@ export class LarkCliAdapter implements OfficeToolAdapter {
       child.stderr.on("data", (chunk) => {
         stderr += chunk.toString();
       });
-      child.on("error", reject);
+      child.on("error", (error) => {
+        finish(new Error(`${operation} failed to start on attempt ${attempt}: ${error.message}`));
+      });
       child.on("close", (code) => {
+        if (timedOut) {
+          finish(
+            new Error(
+              `${operation} timed out after ${this.timeoutMs}ms on attempt ${attempt}: ${args.join(" ")}`
+            )
+          );
+          return;
+        }
+
         if (code === 0) {
-          resolve(stdout);
+          finish(undefined, stdout);
         } else {
-          reject(new Error(stderr || `lark-cli exited with code ${code}`));
+          const detail = (stderr || stdout || `lark-cli exited with code ${code}`).slice(0, 2_000);
+          finish(new Error(`${operation} failed on attempt ${attempt}: ${detail}`));
         }
       });
     });
+  }
+
+  private wait(ms: number) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   private buildCommand(args: string[]) {
@@ -301,6 +361,16 @@ export class LarkCliAdapter implements OfficeToolAdapter {
 
     return candidates.find((candidate): candidate is string => Boolean(candidate && existsSync(candidate)));
   }
+}
+
+export interface LarkCliAdapterOptions {
+  timeoutMs?: number;
+  readRetries?: number;
+}
+
+interface RunOptions {
+  operation?: string;
+  retries?: number;
 }
 
 interface LarkMessageItem {
