@@ -12,28 +12,40 @@ import {
   Monitor,
   Presentation,
   Send,
+  Settings2,
   Smartphone,
   Sparkles
 } from "lucide-react";
 import type { AgentEvent, Artifact, RuntimeConfig, Task } from "@agent-pilot/shared";
 import { sampleDiscussion, sampleIntent } from "@agent-pilot/shared";
-import { createTask, fetchRuntimeConfig, fetchTasks, getRealtimeWsUrl, sendCommand } from "./api";
+import {
+  createTask,
+  fetchRuntimeConfig,
+  fetchTasks,
+  getEndpointConfig,
+  getRealtimeWsUrl,
+  resetEndpointConfig,
+  saveEndpointConfig,
+  sendCommand,
+  type EndpointConfig
+} from "./api";
 
 type SocketMessage =
   | { type: "snapshot"; tasks: Task[]; events: AgentEvent[] }
   | { type: "event"; tasks: Task[]; event: AgentEvent };
 
-const apiWsUrl = getRealtimeWsUrl();
-
 export function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfig | null>(null);
+  const [endpointConfig, setEndpointConfig] = useState<EndpointConfig>(() => getEndpointConfig());
+  const [endpointDraft, setEndpointDraft] = useState(() => getEndpointConfig());
   const [intent, setIntent] = useState(sampleIntent);
   const [command, setCommand] = useState("把权限管理补充得更详细一点，并加上学生和老师的不同操作边界。");
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [connection, setConnection] = useState<"connecting" | "live" | "offline">("connecting");
   const [error, setError] = useState<string | null>(null);
+  const apiWsUrl = useMemo(() => getRealtimeWsUrl(), [endpointConfig]);
 
   const activeTask = useMemo(
     () => tasks.find((task) => task.id === activeTaskId) ?? tasks[0],
@@ -48,16 +60,49 @@ export function App() {
   const triggerEntries = useMemo(() => buildTriggerEntries(activeTask, runtimeConfig), [activeTask, runtimeConfig]);
   const deliveryItems = useMemo(() => buildDeliveryItems(activeTask), [activeTask]);
   const confirmationItems = useMemo(() => buildConfirmationItems(activeTask, deliveryItems), [activeTask, deliveryItems]);
+  const endpointLabel = endpointConfig.source === "local" ? "local" : endpointConfig.source;
 
   useEffect(() => {
-    void fetchRuntimeConfig().then(setRuntimeConfig);
-    void fetchTasks().then((items) => {
-      setTasks(items);
-      if (items[0]) setActiveTaskId(items[0].id);
-    });
+    const refreshEndpointConfig = () => {
+      const nextConfig = getEndpointConfig();
+      setEndpointConfig(nextConfig);
+      setEndpointDraft(nextConfig);
+    };
+
+    window.addEventListener("agent-pilot:endpoints-changed", refreshEndpointConfig);
+    return () => window.removeEventListener("agent-pilot:endpoints-changed", refreshEndpointConfig);
   }, []);
 
   useEffect(() => {
+    let ignore = false;
+
+    async function refreshRuntimeState() {
+      setError(null);
+      try {
+        const [nextConfig, items] = await Promise.all([fetchRuntimeConfig(), fetchTasks()]);
+        if (ignore) return;
+        setRuntimeConfig(nextConfig);
+        setTasks(items);
+        if (items[0]) setActiveTaskId((current) => current ?? items[0].id);
+      } catch (err) {
+        if (ignore) return;
+        setConnection("offline");
+        setError(
+          err instanceof Error
+            ? `无法连接 Agent API：${err.message}`
+            : "无法连接 Agent API"
+        );
+      }
+    }
+
+    void refreshRuntimeState();
+    return () => {
+      ignore = true;
+    };
+  }, [endpointConfig]);
+
+  useEffect(() => {
+    setConnection("connecting");
     const socket = new WebSocket(apiWsUrl);
     socket.onopen = () => setConnection("live");
     socket.onclose = () => setConnection("offline");
@@ -76,7 +121,7 @@ export function App() {
       }
     };
     return () => socket.close();
-  }, []);
+  }, [apiWsUrl]);
 
   async function handleCreateTask() {
     setError(null);
@@ -98,6 +143,16 @@ export function App() {
     }
   }
 
+  function handleEndpointSave() {
+    setError(null);
+    saveEndpointConfig(endpointDraft);
+  }
+
+  function handleEndpointReset() {
+    setError(null);
+    resetEndpointConfig();
+  }
+
   return (
     <main className="shell">
       <header className="topbar">
@@ -114,6 +169,7 @@ export function App() {
           <StatusPill label="实时同步" value={connection === "live" ? "Live" : connection} tone={connection === "live" ? "good" : "warn"} />
           <StatusPill label="LLM" value={runtimeConfig?.llmMode ?? "..."} tone={runtimeConfig?.llmMode === "doubao" ? "good" : "neutral"} />
           <StatusPill label="Office" value={runtimeConfig?.officeAdapter ?? "..."} tone="neutral" />
+          <StatusPill label="API" value={endpointLabel} tone={endpointConfig.source === "local" ? "neutral" : "good"} />
           <StatusPill
             label="测试群"
             value={runtimeConfig?.hasLarkDefaultChatId ? "已配置" : "未配置"}
@@ -249,6 +305,41 @@ export function App() {
                 <Send size={16} />
                 发送追加修改
               </button>
+              <div className="endpointPanel">
+                <div className="endpointHeader">
+                  <Settings2 size={16} />
+                  <strong>连接设置</strong>
+                  <span>{endpointConfig.source}</span>
+                </div>
+                <label>
+                  API 地址
+                  <input
+                    value={endpointDraft.apiBaseUrl}
+                    onChange={(event) =>
+                      setEndpointDraft((current) => ({ ...current, apiBaseUrl: event.target.value }))
+                    }
+                    placeholder="https://your-api.trycloudflare.com"
+                  />
+                </label>
+                <label>
+                  WS 地址
+                  <input
+                    value={endpointDraft.wsUrl}
+                    onChange={(event) =>
+                      setEndpointDraft((current) => ({ ...current, wsUrl: event.target.value }))
+                    }
+                    placeholder="wss://your-api.trycloudflare.com/ws"
+                  />
+                </label>
+                <div className="endpointActions">
+                  <button className="secondaryButton" type="button" onClick={handleEndpointReset}>
+                    重置
+                  </button>
+                  <button className="secondaryButton primary" type="button" onClick={handleEndpointSave}>
+                    应用
+                  </button>
+                </div>
+              </div>
             </div>
 
             <div className="panel artifactsPanel">

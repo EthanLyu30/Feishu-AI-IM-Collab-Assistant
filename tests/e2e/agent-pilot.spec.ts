@@ -18,3 +18,11 @@ test("runs the IM to doc to slides agent workflow", async ({ page }) => {
   });
 });
 
+test("accepts runtime API endpoint overrides for deployed dashboard", async ({ page }) => {
+  await page.goto("/?api=http://localhost:8787&ws=ws://localhost:8787/ws");
+
+  await expect(page.getByRole("heading", { name: "IM 办公协同智能助手" })).toBeVisible();
+  await expect(page.getByLabel("API 地址")).toHaveValue("http://localhost:8787");
+  await expect(page.getByLabel("WS 地址")).toHaveValue("ws://localhost:8787/ws");
+  await expect(page.getByText("Live").first()).toBeVisible();
+});

@@ -79,10 +79,22 @@ npx wrangler whoami
 npm run deploy:web:cloudflare
 ```
 
+检查 Cloudflare 登录、Pages 项目和最近部署：
+
+```powershell
+npm run doctor:deploy
+```
+
 如果后端仍在本地运行，可以用 Cloudflare Tunnel 暂时暴露 API：
 
 ```powershell
 npm run tunnel:api:cloudflare
+```
+
+部署后的页面也支持运行时指定 API 地址：
+
+```text
+https://feishu-ai-im-collab-assistant.pages.dev/?api=https://your-api.trycloudflare.com
 ```
 
 ## 当前 Demo 链路

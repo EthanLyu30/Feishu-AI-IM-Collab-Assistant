@@ -1,5 +1,12 @@
 import type { CreateTaskRequest, RuntimeConfig, SendCommandRequest, Task } from "@agent-pilot/shared";
 
+export type EndpointConfig = {
+  apiBaseUrl: string;
+  wsUrl: string;
+  source: "query" | "storage" | "env" | "local";
+};
+
+const endpointStorageKey = "agent-pilot:endpoints";
 const configuredApiBaseUrl = normalizeBaseUrl(import.meta.env.VITE_API_BASE_URL);
 const configuredWsUrl = normalizeBaseUrl(import.meta.env.VITE_WS_URL);
 
@@ -37,10 +44,11 @@ export async function sendCommand(taskId: string, input: SendCommandRequest): Pr
 }
 
 export function getRealtimeWsUrl(): string {
-  if (configuredWsUrl) return configuredWsUrl;
+  const endpoint = getEndpointConfig();
+  if (endpoint.wsUrl) return endpoint.wsUrl;
 
-  if (configuredApiBaseUrl) {
-    const apiUrl = new URL(configuredApiBaseUrl);
+  if (endpoint.apiBaseUrl) {
+    const apiUrl = new URL(endpoint.apiBaseUrl);
     apiUrl.protocol = apiUrl.protocol === "https:" ? "wss:" : "ws:";
     apiUrl.pathname = appendPath(apiUrl.pathname, "/ws");
     apiUrl.search = "";
@@ -54,8 +62,42 @@ export function getRealtimeWsUrl(): string {
   return `${protocol}://${host}/ws`;
 }
 
+export function getEndpointConfig(): EndpointConfig {
+  const queryConfig = readQueryConfig();
+  if (queryConfig.apiBaseUrl || queryConfig.wsUrl) {
+    persistEndpointConfig(queryConfig);
+    return { ...queryConfig, source: "query" };
+  }
+
+  const storedConfig = readStoredConfig();
+  if (storedConfig.apiBaseUrl || storedConfig.wsUrl) {
+    return { ...storedConfig, source: "storage" };
+  }
+
+  if (configuredApiBaseUrl || configuredWsUrl) {
+    return {
+      apiBaseUrl: configuredApiBaseUrl,
+      wsUrl: configuredWsUrl,
+      source: "env"
+    };
+  }
+
+  return { apiBaseUrl: "", wsUrl: "", source: "local" };
+}
+
+export function saveEndpointConfig(config: Pick<EndpointConfig, "apiBaseUrl" | "wsUrl">) {
+  persistEndpointConfig(config);
+  window.dispatchEvent(new Event("agent-pilot:endpoints-changed"));
+}
+
+export function resetEndpointConfig() {
+  window.localStorage.removeItem(endpointStorageKey);
+  window.dispatchEvent(new Event("agent-pilot:endpoints-changed"));
+}
+
 function apiUrl(path: string) {
-  return configuredApiBaseUrl ? appendPath(configuredApiBaseUrl, path) : path;
+  const endpoint = getEndpointConfig();
+  return endpoint.apiBaseUrl ? appendPath(endpoint.apiBaseUrl, path) : path;
 }
 
 function normalizeBaseUrl(value: unknown) {
@@ -67,4 +109,45 @@ function appendPath(baseUrl: string, path: string) {
   const base = baseUrl.replace(/\/+$/, "");
   const suffix = path.startsWith("/") ? path : `/${path}`;
   return `${base}${suffix}`;
+}
+
+function readQueryConfig() {
+  const params = new URLSearchParams(window.location.search);
+  return {
+    apiBaseUrl: normalizeBaseUrl(params.get("api")),
+    wsUrl: normalizeWsUrl(params.get("ws"))
+  };
+}
+
+function readStoredConfig() {
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(endpointStorageKey) ?? "{}") as Partial<EndpointConfig>;
+    return {
+      apiBaseUrl: normalizeBaseUrl(stored.apiBaseUrl),
+      wsUrl: normalizeWsUrl(stored.wsUrl)
+    };
+  } catch {
+    return { apiBaseUrl: "", wsUrl: "" };
+  }
+}
+
+function persistEndpointConfig(config: Pick<EndpointConfig, "apiBaseUrl" | "wsUrl">) {
+  const nextConfig = {
+    apiBaseUrl: normalizeBaseUrl(config.apiBaseUrl),
+    wsUrl: normalizeWsUrl(config.wsUrl)
+  };
+
+  if (!nextConfig.apiBaseUrl && !nextConfig.wsUrl) {
+    window.localStorage.removeItem(endpointStorageKey);
+    return;
+  }
+
+  window.localStorage.setItem(endpointStorageKey, JSON.stringify(nextConfig));
+}
+
+function normalizeWsUrl(value: unknown) {
+  const normalized = normalizeBaseUrl(value);
+  if (!normalized) return "";
+  if (normalized.endsWith("/ws")) return normalized;
+  return appendPath(normalized, "/ws");
 }
