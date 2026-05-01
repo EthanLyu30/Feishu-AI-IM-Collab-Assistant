@@ -3,8 +3,15 @@ param(
 )
 
 $cloudflared = Get-Command cloudflared -ErrorAction SilentlyContinue
+$cloudflaredPath = $cloudflared.Source
 
-if (-not $cloudflared) {
+if (-not $cloudflaredPath) {
+  $wingetInstall = Get-ChildItem -Path "$env:LOCALAPPDATA\Microsoft\WinGet\Packages" -Recurse -Filter cloudflared.exe -ErrorAction SilentlyContinue |
+    Select-Object -First 1 -ExpandProperty FullName
+  $cloudflaredPath = $wingetInstall
+}
+
+if (-not $cloudflaredPath) {
   Write-Error @"
 cloudflared is not installed or is not in PATH.
 
@@ -19,4 +26,4 @@ Target service:
 
 Write-Host "Starting Cloudflare quick tunnel for $TargetUrl"
 Write-Host "Copy the generated https://*.trycloudflare.com URL into VITE_API_BASE_URL for a temporary demo."
-cloudflared tunnel --url $TargetUrl
+& $cloudflaredPath tunnel --url $TargetUrl
