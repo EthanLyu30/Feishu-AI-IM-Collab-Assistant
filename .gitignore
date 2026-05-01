@@ -23,4 +23,5 @@ Thumbs.db
 # Temporary files
 .tmp/
 .data/
+.runtime/
 outputs/*.local.*

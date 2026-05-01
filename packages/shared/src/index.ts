@@ -141,6 +141,22 @@ export interface RuntimeConfig {
   larkImTriggerPath: string;
 }
 
+export interface ReadinessCheck {
+  id: string;
+  label: string;
+  ok: boolean;
+  detail: string;
+}
+
+export interface ReadinessStatus {
+  ok: boolean;
+  checkedAt: string;
+  uptimeSeconds: number;
+  publicApiBaseUrl?: string;
+  publicWebBaseUrl?: string;
+  checks: ReadinessCheck[];
+}
+
 export const sampleDiscussion: ChatMessage[] = [
   {
     id: "m1",

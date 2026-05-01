@@ -28,6 +28,11 @@ export class TaskStore {
     return this.tasks.get(taskId);
   }
 
+  clear() {
+    this.tasks.clear();
+    this.events = [];
+  }
+
   createTask(input: { title: string; source: TaskSource; userIntent: string; trigger?: Task["trigger"] }) {
     const now = nowIso();
     const task: Task = {

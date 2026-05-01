@@ -3,11 +3,26 @@ import { createHash } from "node:crypto";
 import { calculateLarkSignature } from "../../apps/api/src/security/LarkEventGuard";
 
 test.describe("Lark IM trigger API", () => {
+  test.beforeEach(async ({ request }) => {
+    await request.delete("/api/test/reset");
+  });
+
   test("handles challenge and ignores non-trigger messages", async ({ request }) => {
     const health = await request.get("/health");
     await expect(health).toBeOK();
     const healthBody = await health.json();
     expect(healthBody).toMatchObject({ llm: "mock", officeAdapter: "mock" });
+
+    const readiness = await request.get("/api/readiness");
+    await expect(readiness).toBeOK();
+    expect(await readiness.json()).toMatchObject({
+      ok: false,
+      checks: expect.arrayContaining([
+        expect.objectContaining({ id: "llm", ok: false }),
+        expect.objectContaining({ id: "office", ok: false }),
+        expect.objectContaining({ id: "state", ok: false })
+      ])
+    });
 
     const challenge = await request.post("/api/triggers/lark-im", {
       data: { challenge: "verify-token" }

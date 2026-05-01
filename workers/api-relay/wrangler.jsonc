@@ -1,0 +1,12 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "feishu-agent-api-relay",
+  "main": "src/index.js",
+  "compatibility_date": "2026-04-01",
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    "UPSTREAM_API_BASE_URL": "https://replace-with-current-api.example.com"
+  }
+}

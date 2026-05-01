@@ -33,7 +33,10 @@ const envSchema = z.object({
   LARK_ALLOWED_CHAT_IDS: z.string().optional(),
   LARK_BOT_OPEN_ID: z.string().optional(),
   LARK_BOT_USER_ID: z.string().optional(),
-  LARK_STATE_PATH: z.string().default(".data/lark-state.json")
+  LARK_STATE_PATH: z.string().default(".data/lark-state.json"),
+  PUBLIC_API_BASE_URL: z.string().url().optional(),
+  PUBLIC_WEB_BASE_URL: z.string().url().optional(),
+  ENABLE_TEST_ENDPOINTS: z.coerce.boolean().default(false)
 });
 
 const parsed = envSchema.parse(process.env);
@@ -53,6 +56,9 @@ export const config = {
   larkBotOpenId: parsed.LARK_BOT_OPEN_ID,
   larkBotUserId: parsed.LARK_BOT_USER_ID,
   larkStatePath: parsed.LARK_STATE_PATH,
+  publicApiBaseUrl: parsed.PUBLIC_API_BASE_URL,
+  publicWebBaseUrl: parsed.PUBLIC_WEB_BASE_URL,
+  enableTestEndpoints: parsed.ENABLE_TEST_ENDPOINTS,
   get useDoubao() {
     return Boolean(
       parsed.AGENT_LLM_MODE === "doubao" && parsed.ARK_ENDPOINT_ID && parsed.ARK_API_KEY

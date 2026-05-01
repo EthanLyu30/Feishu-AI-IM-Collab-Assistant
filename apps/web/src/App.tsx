@@ -16,10 +16,11 @@ import {
   Smartphone,
   Sparkles
 } from "lucide-react";
-import type { AgentEvent, Artifact, RuntimeConfig, Task } from "@agent-pilot/shared";
+import type { AgentEvent, Artifact, ReadinessStatus, RuntimeConfig, Task } from "@agent-pilot/shared";
 import { sampleDiscussion, sampleIntent } from "@agent-pilot/shared";
 import {
   createTask,
+  fetchReadiness,
   fetchRuntimeConfig,
   fetchTasks,
   getEndpointConfig,
@@ -38,6 +39,7 @@ export function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfig | null>(null);
+  const [readiness, setReadiness] = useState<ReadinessStatus | null>(null);
   const [endpointConfig, setEndpointConfig] = useState<EndpointConfig>(() => getEndpointConfig());
   const [endpointDraft, setEndpointDraft] = useState(() => getEndpointConfig());
   const [intent, setIntent] = useState(sampleIntent);
@@ -79,9 +81,14 @@ export function App() {
     async function refreshRuntimeState() {
       setError(null);
       try {
-        const [nextConfig, items] = await Promise.all([fetchRuntimeConfig(), fetchTasks()]);
+        const [nextConfig, nextReadiness, items] = await Promise.all([
+          fetchRuntimeConfig(),
+          fetchReadiness(),
+          fetchTasks()
+        ]);
         if (ignore) return;
         setRuntimeConfig(nextConfig);
+        setReadiness(nextReadiness);
         setTasks(items);
         if (items[0]) setActiveTaskId((current) => current ?? items[0].id);
       } catch (err) {
@@ -127,6 +134,7 @@ export function App() {
     setError(null);
     try {
       const task = await createTask({ intent, source: "desktop" });
+      setTasks((current) => [task, ...current.filter((item) => item.id !== task.id)]);
       setActiveTaskId(task.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "任务创建失败");
@@ -137,7 +145,8 @@ export function App() {
     if (!activeTask) return;
     setError(null);
     try {
-      await sendCommand(activeTask.id, { command });
+      const task = await sendCommand(activeTask.id, { command });
+      setTasks((current) => current.map((item) => (item.id === task.id ? task : item)));
     } catch (err) {
       setError(err instanceof Error ? err.message : "指令发送失败");
     }
@@ -340,6 +349,7 @@ export function App() {
                   </button>
                 </div>
               </div>
+              <ReadinessPanel readiness={readiness} />
             </div>
 
             <div className="panel artifactsPanel">
@@ -412,6 +422,32 @@ function StatusPill(props: { label: string; value: string; tone: "good" | "warn"
     <div className={`statusPill ${props.tone}`}>
       <span>{props.label}</span>
       <strong>{props.value}</strong>
+    </div>
+  );
+}
+
+function ReadinessPanel({ readiness }: { readiness: ReadinessStatus | null }) {
+  const checks = readiness?.checks ?? [];
+  const topChecks = checks.slice(0, 7);
+
+  return (
+    <div className="readinessPanel">
+      <div className="readinessHeader">
+        <strong>上线检查</strong>
+        <span className={readiness?.ok ? "good" : "warn"}>{readiness?.ok ? "ready" : "needs work"}</span>
+      </div>
+      <div className="readinessList">
+        {topChecks.map((check) => (
+          <div className={`readinessItem ${check.ok ? "good" : "warn"}`} key={check.id} title={check.detail}>
+            <span>{check.ok ? "通过" : "待补"}</span>
+            <div>
+              <strong>{check.label}</strong>
+              <p>{check.detail}</p>
+            </div>
+          </div>
+        ))}
+        {!topChecks.length ? <p className="empty">连接 Agent API 后会显示部署检查项。</p> : null}
+      </div>
     </div>
   );
 }

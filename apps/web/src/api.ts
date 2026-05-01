@@ -1,4 +1,10 @@
-import type { CreateTaskRequest, RuntimeConfig, SendCommandRequest, Task } from "@agent-pilot/shared";
+import type {
+  CreateTaskRequest,
+  ReadinessStatus,
+  RuntimeConfig,
+  SendCommandRequest,
+  Task
+} from "@agent-pilot/shared";
 
 export type EndpointConfig = {
   apiBaseUrl: string;
@@ -9,6 +15,7 @@ export type EndpointConfig = {
 const endpointStorageKey = "agent-pilot:endpoints";
 const configuredApiBaseUrl = normalizeBaseUrl(import.meta.env.VITE_API_BASE_URL);
 const configuredWsUrl = normalizeBaseUrl(import.meta.env.VITE_WS_URL);
+const configuredDevProxyOrigin = normalizeBaseUrl(import.meta.env.VITE_PROXY_API_ORIGIN);
 
 export async function fetchRuntimeConfig(): Promise<RuntimeConfig> {
   const response = await fetch(apiUrl("/api/config"));
@@ -19,6 +26,11 @@ export async function fetchTasks(): Promise<Task[]> {
   const response = await fetch(apiUrl("/api/tasks"));
   const data = await response.json();
   return data.tasks;
+}
+
+export async function fetchReadiness(): Promise<ReadinessStatus> {
+  const response = await fetch(apiUrl("/api/readiness"));
+  return response.json();
 }
 
 export async function createTask(input: CreateTaskRequest): Promise<Task> {
@@ -54,6 +66,15 @@ export function getRealtimeWsUrl(): string {
     apiUrl.search = "";
     apiUrl.hash = "";
     return apiUrl.toString();
+  }
+
+  if (configuredDevProxyOrigin) {
+    const proxyUrl = new URL(configuredDevProxyOrigin);
+    proxyUrl.protocol = proxyUrl.protocol === "https:" ? "wss:" : "ws:";
+    proxyUrl.pathname = appendPath(proxyUrl.pathname, "/ws");
+    proxyUrl.search = "";
+    proxyUrl.hash = "";
+    return proxyUrl.toString();
   }
 
   const isLocal = ["localhost", "127.0.0.1", "0.0.0.0"].includes(window.location.hostname);

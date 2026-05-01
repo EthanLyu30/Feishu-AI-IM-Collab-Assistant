@@ -57,6 +57,7 @@ npm run dev:lark-events
 - `飞书开放平台后台填写清单.md`
 - `飞书开放平台长连接接入指南.md`
 - `飞书应用初版交付与部署指南.md`
+- `稳定API方案与迁移路线.md`
 
 ## Cloudflare Pages 初版部署
 
@@ -89,6 +90,40 @@ npm run doctor:deploy
 
 ```powershell
 npm run tunnel:api:cloudflare
+```
+
+比赛现场可以用一键演示栈启动 API、飞书事件桥接和 Cloudflare Tunnel：
+
+```powershell
+npm run demo:stack
+```
+
+如果希望飞书后台填写一个长期不变的入口，但后端暂时仍跑在本机，优先部署 Cloudflare Pages 边缘代理。这样飞书后台可以直接填写固定的 Pages URL，`/api/*` 和 `/ws` 会由 Pages `_worker.js` 转发到当前 Agent API：
+
+```powershell
+npm run demo:stack
+npm run deploy:web-proxy:cloudflare
+```
+
+之后飞书后台可以优先填写：
+
+```text
+https://feishu-ai-im-collab-assistant.pages.dev
+```
+
+每次 Quick Tunnel 变化后，只需重新运行 `npm run deploy:web-proxy:cloudflare` 更新 Pages 的转发目标，不必反复修改飞书后台。
+
+如果你的账号已经注册了 `workers.dev` 子域名，也可以部署独立 Worker Relay：
+
+```powershell
+npm run deploy:api-relay:cloudflare
+```
+
+如果已经拥有接入 Cloudflare 的自有域名，推荐改用 Named Tunnel/token 的稳定栈：
+
+```powershell
+npm run stable:stack
+npm run doctor:stable-api
 ```
 
 部署后的页面也支持运行时指定 API 地址：

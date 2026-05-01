@@ -6,6 +6,7 @@ import type {
   CreateTaskRequest,
   LarkImTriggerRequest,
   LarkImTriggerResponse,
+  ReadinessStatus,
   RuntimeConfig,
   SendCommandRequest,
   Task,
@@ -79,6 +80,7 @@ const llm = createLlm();
 const office = createOfficeAdapter();
 const orchestrator = new AgentOrchestrator(store, llm, office);
 const handledLarkMessages = new HandledMessageStore(config.larkStatePath);
+const startedAt = Date.now();
 
 attachRealtime(server, store);
 
@@ -108,6 +110,76 @@ app.get("/api/config", (_req, res) => {
   res.json(runtimeConfig);
 });
 
+app.get("/api/readiness", (_req, res) => {
+  const checks = [
+    {
+      id: "llm",
+      label: "豆包 2.0 Pro",
+      ok: llm.mode === "doubao" && config.useDoubao,
+      detail:
+        llm.mode === "doubao" && config.useDoubao
+          ? "已配置 Ark endpoint 和 API key。"
+          : "当前未完整启用 doubao，可能处于 mock 或缺少 Ark 配置。"
+    },
+    {
+      id: "office",
+      label: "飞书 Office Adapter",
+      ok: office.name === "lark-cli",
+      detail: office.name === "lark-cli" ? "已使用 lark-cli 创建 Docs / Slides / 群回发。" : "当前使用 mock adapter。"
+    },
+    {
+      id: "chat",
+      label: "默认测试群",
+      ok: Boolean(config.larkDefaultChatId),
+      detail: config.larkDefaultChatId ? "已配置默认测试群。" : "未配置 LARK_DEFAULT_CHAT_ID。"
+    },
+    {
+      id: "allowed-chats",
+      label: "群白名单",
+      ok: config.larkAllowedChatIds.length > 0,
+      detail: config.larkAllowedChatIds.length
+        ? `已限制 ${config.larkAllowedChatIds.length} 个允许触发的群。`
+        : "未配置 LARK_ALLOWED_CHAT_IDS，真实演示前建议限制测试群。"
+    },
+    {
+      id: "bot-filter",
+      label: "机器人自消息过滤",
+      ok: Boolean(config.larkBotOpenId || config.larkBotUserId),
+      detail: config.larkBotOpenId || config.larkBotUserId
+        ? "已配置机器人身份过滤。"
+        : "未配置 LARK_BOT_OPEN_ID / LARK_BOT_USER_ID，仅依赖 senderType 过滤。"
+    },
+    {
+      id: "event-security",
+      label: "事件安全",
+      ok: Boolean(config.larkEventVerifyToken || config.larkEventEncryptKey),
+      detail: config.larkEventVerifyToken || config.larkEventEncryptKey
+        ? "已配置 verify token 或 encrypt key。"
+        : "长连接本地演示可运行；若切 webhook，必须配置签名或 token。"
+    },
+    {
+      id: "state",
+      label: "幂等状态",
+      ok: config.larkStatePath !== ":memory:",
+      detail:
+        config.larkStatePath === ":memory:"
+          ? "当前幂等记录为内存模式，重启后会丢失。"
+          : `幂等记录路径：${config.larkStatePath}`
+    }
+  ];
+
+  const readiness: ReadinessStatus = {
+    ok: checks.every((check) => check.ok),
+    checkedAt: new Date().toISOString(),
+    uptimeSeconds: Math.floor((Date.now() - startedAt) / 1000),
+    publicApiBaseUrl: config.publicApiBaseUrl,
+    publicWebBaseUrl: config.publicWebBaseUrl,
+    checks
+  };
+
+  res.json(readiness);
+});
+
 app.get("/api/tasks", (_req, res) => {
   res.json({ tasks: store.listTasks(), events: store.listEvents() });
 });
@@ -119,6 +191,16 @@ app.get("/api/tasks/:taskId", (req, res) => {
     return;
   }
   res.json({ task, events: store.listEvents(task.id) });
+});
+
+app.delete("/api/test/reset", (_req, res) => {
+  if (!config.enableTestEndpoints) {
+    res.status(404).json({ error: "Not found." });
+    return;
+  }
+
+  store.clear();
+  res.json({ ok: true });
 });
 
 app.post("/api/tasks", (req, res) => {

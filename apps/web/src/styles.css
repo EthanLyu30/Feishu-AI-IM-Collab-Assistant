@@ -292,6 +292,90 @@ input:focus {
   border-top: 1px solid rgba(76, 92, 126, 0.12);
 }
 
+.readinessPanel {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(76, 92, 126, 0.12);
+}
+
+.readinessHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: #42506b;
+}
+
+.readinessHeader span {
+  padding: 3px 8px;
+  border-radius: 8px;
+  background: #eef2f7;
+  color: #68758e;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.readinessHeader span.good {
+  color: #08775f;
+  background: #ddf5ed;
+}
+
+.readinessHeader span.warn {
+  color: #a15c00;
+  background: #fff4dd;
+}
+
+.readinessList {
+  display: grid;
+  gap: 8px;
+}
+
+.readinessItem {
+  display: grid;
+  grid-template-columns: 48px 1fr;
+  gap: 9px;
+  padding: 9px;
+  border: 1px solid rgba(76, 92, 126, 0.12);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.readinessItem > span {
+  align-self: start;
+  padding: 3px 6px;
+  border-radius: 8px;
+  text-align: center;
+  color: #68758e;
+  background: #eef2f7;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.readinessItem.good > span {
+  color: #08775f;
+  background: #ddf5ed;
+}
+
+.readinessItem.warn > span {
+  color: #a15c00;
+  background: #fff4dd;
+}
+
+.readinessItem strong {
+  display: block;
+  color: #172033;
+  font-size: 13px;
+}
+
+.readinessItem p {
+  margin: 3px 0 0;
+  color: #68758e;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .endpointHeader {
   display: flex;
   align-items: center;
