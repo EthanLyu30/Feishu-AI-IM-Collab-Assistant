@@ -37,7 +37,7 @@ ARK_API_KEY=你的 Ark API Key
 
 ## 后续接入飞书
 
-第一阶段保持 `OFFICE_ADAPTER=mock`。
+第一阶段可以保持 `OFFICE_ADAPTER=mock`，用于离线演示。
 
 当飞书 API、MCP 或 `larksuite/cli` 权限完成后，可以切换：
 
@@ -46,7 +46,44 @@ OFFICE_ADAPTER=lark-cli
 LARK_CLI_BIN=lark-cli
 ```
 
-真实命令实现集中在 `apps/api/src/adapters/LarkCliAdapter.ts`，不会影响 Agent 主流程。
+真实命令实现集中在 `apps/api/src/adapters/LarkCliAdapter.ts`，不会影响 Agent 主流程。飞书机器人事件优先通过长连接接入：
+
+```powershell
+npm run dev:lark-events
+```
+
+详细配置见：
+
+- `飞书开放平台后台填写清单.md`
+- `飞书开放平台长连接接入指南.md`
+- `飞书应用初版交付与部署指南.md`
+
+## Cloudflare Pages 初版部署
+
+Web 仪表盘已经支持通过环境变量连接远程或隧道后的 API：
+
+```env
+VITE_API_BASE_URL=https://your-api-domain.example.com
+VITE_WS_URL=wss://your-api-domain.example.com/ws
+```
+
+部署前确认 Cloudflare Wrangler 已登录：
+
+```powershell
+npx wrangler whoami
+```
+
+部署 Web 仪表盘：
+
+```powershell
+npm run deploy:web:cloudflare
+```
+
+如果后端仍在本地运行，可以用 Cloudflare Tunnel 暂时暴露 API：
+
+```powershell
+npm run tunnel:api:cloudflare
+```
 
 ## 当前 Demo 链路
 
@@ -59,4 +96,3 @@ IM 自然语言指令
   -> 生成讲稿与交付摘要
   -> WebSocket 同步到移动端与桌面端仪表盘
 ```
-

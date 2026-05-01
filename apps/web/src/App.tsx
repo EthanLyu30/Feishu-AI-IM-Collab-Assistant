@@ -17,13 +17,13 @@ import {
 } from "lucide-react";
 import type { AgentEvent, Artifact, RuntimeConfig, Task } from "@agent-pilot/shared";
 import { sampleDiscussion, sampleIntent } from "@agent-pilot/shared";
-import { createTask, fetchRuntimeConfig, fetchTasks, sendCommand } from "./api";
+import { createTask, fetchRuntimeConfig, fetchTasks, getRealtimeWsUrl, sendCommand } from "./api";
 
 type SocketMessage =
   | { type: "snapshot"; tasks: Task[]; events: AgentEvent[] }
   | { type: "event"; tasks: Task[]; event: AgentEvent };
 
-const apiWsUrl = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.hostname}:8787/ws`;
+const apiWsUrl = getRealtimeWsUrl();
 
 export function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
