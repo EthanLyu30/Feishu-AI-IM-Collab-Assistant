@@ -13,6 +13,8 @@
     "dev:api": "npm run dev -w @agent-pilot/api",
     "dev:web": "npm run dev -w @agent-pilot/web",
     "dev:lark-events": "node scripts/lark-event-bridge.mjs",
+    "serve:api": "tsx apps/api/src/index.ts",
+    "serve:lark-events": "node scripts/lark-event-bridge.mjs",
     "demo:stack": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-demo-stack.ps1",
     "stable:stack": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-stable-stack.ps1",
     "tunnel:api:cloudflare": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-cloudflare-tunnel.ps1 -TargetUrl http://localhost:8787",
@@ -20,6 +22,10 @@
     "deploy:web-proxy:cloudflare": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deploy-pages-proxy.ps1",
     "doctor:deploy": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/doctor-deployment.ps1",
     "doctor:stable-api": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/doctor-stable-api.ps1",
+    "doctor:runtime": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/doctor-runtime.ps1",
+    "doctor:delivery": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/doctor-delivery.ps1",
+    "doctor:ui": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/doctor-ui-harness.ps1",
+    "harness:loop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/harness-loop.ps1",
     "build:web": "npm run build -w @agent-pilot/web",
     "deploy:web:cloudflare": "npm run build:web && npx --yes wrangler@4.87.0 pages deploy apps/web/dist --project-name feishu-ai-im-collab-assistant",
     "build": "npm run build --workspaces",
@@ -29,7 +35,7 @@
   "devDependencies": {
     "@playwright/test": "^1.59.1",
     "concurrently": "^9.2.1",
-    "cross-env": "^10.2.0",
+    "cross-env": "^10.1.0",
     "typescript": "^5.9.3"
   }
 }

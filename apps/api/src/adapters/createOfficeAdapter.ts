@@ -6,6 +6,7 @@ import { MockOfficeToolAdapter } from "./MockOfficeToolAdapter";
 export function createOfficeAdapter(): OfficeToolAdapter {
   if (config.officeAdapter === "lark-cli") {
     return new LarkCliAdapter(config.larkCliBin, config.larkDefaultChatId, {
+      identity: config.larkCliActAs,
       timeoutMs: config.larkCliTimeoutMs,
       readRetries: config.larkCliReadRetries
     });

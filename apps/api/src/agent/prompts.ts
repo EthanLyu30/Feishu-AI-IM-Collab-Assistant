@@ -68,7 +68,14 @@ export function buildSlidesPrompt(docMarkdown: string) {
     {
       role: "system" as const,
       content:
-        "你是演示稿结构设计助手。请把需求文档转成 5 页中文 PPT 内容，使用 Markdown，每页包含标题、3-5 个要点和讲者备注。"
+        [
+          "你是比赛汇报演示稿结构设计助手。请把需求文档转成 6 页中文 PPT 内容，使用 Markdown，不要输出代码块。",
+          "每页使用二级标题，标题格式为“## 第 N 页：页面标题”。",
+          "推荐页序：封面、背景痛点、Agent 方案、核心流程、角色权限、交付计划。",
+          "每页包含 3-4 个短要点，每个要点不超过 24 个汉字。",
+          "每页末尾必须包含“讲者备注：...”，用于 3 分钟排练。",
+          "内容要体现 AI Agent 是主驾驶、GUI 是辅助仪表盘，并明确串联 IM、Docs、Slides。"
+        ].join("\n")
     },
     {
       role: "user" as const,

@@ -1,22 +1,32 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import {
+  Activity,
   Bot,
+  Check,
   CheckCircle2,
-  ClipboardCheck,
+  ChevronRight,
+  Circle,
   Clock3,
   ExternalLink,
   FileText,
+  Gauge,
+  LayoutDashboard,
   Loader2,
+  Menu,
   MessageSquareText,
   Monitor,
   Presentation,
+  Radio,
+  RotateCcw,
   Send,
   Settings2,
+  ShieldCheck,
   Smartphone,
-  Sparkles
+  Sparkles,
+  XCircle
 } from "lucide-react";
-import type { AgentEvent, Artifact, ReadinessStatus, RuntimeConfig, Task } from "@agent-pilot/shared";
+import type { AgentEvent, AgentStep, Artifact, ReadinessStatus, RuntimeConfig, Task } from "@agent-pilot/shared";
 import { sampleDiscussion, sampleIntent } from "@agent-pilot/shared";
 import {
   createTask,
@@ -35,6 +45,23 @@ type SocketMessage =
   | { type: "snapshot"; tasks: Task[]; events: AgentEvent[] }
   | { type: "event"; tasks: Task[]; event: AgentEvent };
 
+const workflowStages = [
+  { tool: "im.read", label: "IM", icon: <MessageSquareText size={16} /> },
+  { tool: "planner", label: "Plan", icon: <Bot size={16} /> },
+  { tool: "doc.create", label: "Doc", icon: <FileText size={16} /> },
+  { tool: "slides.create", label: "Slides", icon: <Presentation size={16} /> },
+  { tool: "summary.deliver", label: "Deliver", icon: <CheckCircle2 size={16} /> }
+] as const;
+
+const sceneMeta = [
+  { id: "A", title: "IM 入口", detail: "群聊自然语言", icon: <MessageSquareText size={16} /> },
+  { id: "B", title: "任务规划", detail: "Planner 拆解", icon: <Bot size={16} /> },
+  { id: "C", title: "Docs", detail: "需求文档", icon: <FileText size={16} /> },
+  { id: "D", title: "Slides", detail: "汇报材料", icon: <Presentation size={16} /> },
+  { id: "E", title: "多端同步", detail: "WebSocket 状态", icon: <Monitor size={16} /> },
+  { id: "F", title: "总结交付", detail: "群回发归档", icon: <CheckCircle2 size={16} /> }
+] as const;
+
 export function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [events, setEvents] = useState<AgentEvent[]>([]);
@@ -47,22 +74,26 @@ export function App() {
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [connection, setConnection] = useState<"connecting" | "live" | "offline">("connecting");
   const [error, setError] = useState<string | null>(null);
-  const apiWsUrl = useMemo(() => getRealtimeWsUrl(), [endpointConfig]);
 
+  const apiWsUrl = useMemo(() => getRealtimeWsUrl(), [endpointConfig]);
   const activeTask = useMemo(
     () => tasks.find((task) => task.id === activeTaskId) ?? tasks[0],
     [activeTaskId, tasks]
   );
-
   const taskEvents = useMemo(
     () => events.filter((event) => event.taskId === activeTask?.id),
     [activeTask?.id, events]
   );
-
-  const triggerEntries = useMemo(() => buildTriggerEntries(activeTask, runtimeConfig), [activeTask, runtimeConfig]);
   const deliveryItems = useMemo(() => buildDeliveryItems(activeTask), [activeTask]);
-  const confirmationItems = useMemo(() => buildConfirmationItems(activeTask, deliveryItems), [activeTask, deliveryItems]);
-  const endpointLabel = endpointConfig.source === "local" ? "local" : endpointConfig.source;
+  const runMetrics = useMemo(
+    () => buildRunMetrics(activeTask, readiness, taskEvents, deliveryItems, connection),
+    [activeTask, connection, deliveryItems, readiness, taskEvents]
+  );
+  const nextActions = useMemo(
+    () => buildNextActions(activeTask, readiness, deliveryItems),
+    [activeTask, deliveryItems, readiness]
+  );
+  const endpointLabel = endpointConfig.source === "local" ? "same-origin" : endpointConfig.source;
 
   useEffect(() => {
     const refreshEndpointConfig = () => {
@@ -94,11 +125,7 @@ export function App() {
       } catch (err) {
         if (ignore) return;
         setConnection("offline");
-        setError(
-          err instanceof Error
-            ? `无法连接 Agent API：${err.message}`
-            : "无法连接 Agent API"
-        );
+        setError(err instanceof Error ? `无法连接 Agent API：${err.message}` : "无法连接 Agent API");
       }
     }
 
@@ -163,291 +190,457 @@ export function App() {
   }
 
   return (
-    <main className="shell">
-      <header className="topbar">
-        <div className="brand">
-          <div className="brandMark">
-            <Sparkles size={20} />
+    <main className="appShell">
+      <aside className="sideNav" aria-label="Agent-Pilot navigation">
+        <div className="navBrand">
+          <div className="brandGlyph">
+            <Sparkles size={18} />
           </div>
           <div>
-            <p className="eyebrow">Agent-Pilot</p>
-            <h1>IM 办公协同智能助手</h1>
+            <strong>Agent-Pilot</strong>
+            <span>Feishu IM</span>
           </div>
         </div>
-        <div className="statusRail">
-          <StatusPill label="实时同步" value={connection === "live" ? "Live" : connection} tone={connection === "live" ? "good" : "warn"} />
-          <StatusPill label="LLM" value={runtimeConfig?.llmMode ?? "..."} tone={runtimeConfig?.llmMode === "doubao" ? "good" : "neutral"} />
-          <StatusPill label="Office" value={runtimeConfig?.officeAdapter ?? "..."} tone="neutral" />
-          <StatusPill label="API" value={endpointLabel} tone={endpointConfig.source === "local" ? "neutral" : "good"} />
-          <StatusPill
-            label="测试群"
-            value={runtimeConfig?.hasLarkDefaultChatId ? "已配置" : "未配置"}
-            tone={runtimeConfig?.hasLarkDefaultChatId ? "good" : "warn"}
-          />
+        <nav className="navItems">
+          <NavItem active icon={<LayoutDashboard size={18} />} label="运行台" />
+          <NavItem icon={<Activity size={18} />} label="流程" />
+          <NavItem icon={<FileText size={18} />} label="产物" />
+          <NavItem icon={<ShieldCheck size={18} />} label="检查" />
+        </nav>
+        <div className="navFoot">
+          <StatusDot state={connection} />
+          <span>{connection === "live" ? "实时连接" : connection === "connecting" ? "连接中" : "离线"}</span>
         </div>
-      </header>
+      </aside>
 
-      {error ? <div className="errorBanner">{error}</div> : null}
-
-      <section className="workspace">
-        <aside className="mobilePane">
-          <PaneTitle icon={<Smartphone size={18} />} title="移动端 IM 入口" subtitle="自然语言触发任务" />
-          <div className="phoneFrame">
-            <div className="chatHeader">校园活动报名系统讨论群</div>
-            <div className="chatList">
-              {sampleDiscussion.map((message) => (
-                <div className={`bubble ${message.sender === "user" ? "mine" : ""}`} key={message.id}>
-                  {message.content}
-                </div>
-              ))}
-              <div className="bubble agentBubble">可以直接告诉我你想沉淀成什么成果。</div>
+      <section className="workbench">
+        <header className="headerBar">
+          <div>
+            <div className="pageKicker">
+              <span>Agent-Pilot Console</span>
+              <span>Feishu Office Loop</span>
             </div>
-            <div className="composer">
+            <h1>飞书协同 Agent 运行台</h1>
+            <p>IM 触发，Agent 编排，Docs / Slides / 群回发统一观测。</p>
+          </div>
+          <div className="headerActions">
+            <MetricPill label="LLM" value={runtimeConfig?.llmMode ?? "..."} tone={runtimeConfig?.llmMode === "doubao" ? "good" : "neutral"} />
+            <MetricPill label="Office" value={runtimeConfig?.officeAdapter ?? "..."} tone={runtimeConfig?.officeAdapter === "lark-cli" ? "good" : "neutral"} />
+            <MetricPill label="API" value={endpointLabel} tone="good" />
+          </div>
+        </header>
+
+        {error ? <div className="errorBanner">{error}</div> : null}
+
+        <section className="commandDeck">
+          <div className="deckMain">
+            <div className="deckTopline">
+              <div className="deckTitle">
+                <div className="sectionIcon">
+                  <MessageSquareText size={18} />
+                </div>
+                <div>
+                  <h2>自然语言任务入口</h2>
+                  <p>{runtimeConfig?.hasLarkDefaultChatId ? "已连接飞书测试群，也可在此发起同等流程。" : "当前页面可发起同等流程。"}</p>
+                </div>
+              </div>
+              <div className="missionState">
+                <span>{connection === "live" ? "Live" : connection === "connecting" ? "Syncing" : "Offline"}</span>
+                <strong>{activeTask?.status ?? "standby"}</strong>
+              </div>
+            </div>
+            <div className="intentComposer">
               <textarea value={intent} onChange={(event) => setIntent(event.target.value)} />
-              <button className="iconButton primary" onClick={handleCreateTask} title="发送指令">
-                <Send size={18} />
+              <button className="primaryButton" type="button" onClick={handleCreateTask}>
+                <Send size={16} />
+                启动 Agent
               </button>
             </div>
+            <div className="runMetricGrid">
+              {runMetrics.map((metric) => (
+                <RunMetricCard key={metric.label} {...metric} />
+              ))}
+            </div>
           </div>
-        </aside>
-
-        <section className="desktopPane">
-          <PaneTitle icon={<Monitor size={18} />} title="桌面端 Agent 仪表盘" subtitle="规划、执行、产物与交付" />
-          <div className="overviewStrip">
-            <div className="panel miniPanel triggerPanel">
-              <div className="panelHeader compact">
-                <div>
-                  <p className="eyebrow">Entry</p>
-                  <h2>触发入口状态</h2>
-                </div>
-                <MessageSquareText size={20} />
-              </div>
-              <div className="statusStack">
-                {triggerEntries.map((entry) => (
-                  <StatusRow key={entry.label} {...entry} />
-                ))}
-              </div>
+          <div className="deckAside">
+            <div className="cloudBadge">
+              <Radio size={16} />
+              <span>云端常驻</span>
+              <strong>{readiness?.ok ? "Ready" : "Check"}</strong>
             </div>
-
-            <div className="panel miniPanel deliveryPanel">
-              <div className="panelHeader compact">
-                <div>
-                  <p className="eyebrow">Delivery</p>
-                  <h2>Docs / Slides 交付</h2>
-                </div>
-                <ClipboardCheck size={20} />
-              </div>
-              <div className="deliveryGrid">
-                {deliveryItems.map((item) => (
-                  <DeliveryTile key={item.label} {...item} />
-                ))}
-              </div>
+            <p>当前服务器入口可同时作为飞书桌面端和移动端网页应用主页。</p>
+            <div className="miniCheckList">
+              <MiniCheck label="Doubao" ok={runtimeConfig?.llmMode === "doubao"} />
+              <MiniCheck label="lark-cli" ok={runtimeConfig?.officeAdapter === "lark-cli"} />
+              <MiniCheck label="WebSocket" ok={connection === "live"} />
             </div>
+          </div>
+        </section>
 
-            <div className="panel miniPanel confirmPanel">
-              <div className="panelHeader compact">
-                <div>
-                  <p className="eyebrow">Next</p>
-                  <h2>下一步确认节点</h2>
+        <SceneCoverage
+          activeTask={activeTask}
+          connection={connection}
+          readiness={readiness}
+          runtimeConfig={runtimeConfig}
+        />
+
+        <section className="contentGrid">
+          <section className="mainColumn">
+            <Panel
+              title={activeTask?.title ?? "等待任务"}
+              label="Current pipeline"
+              icon={<Gauge size={18} />}
+              action={activeTask ? <TaskBadge status={activeTask.status} /> : null}
+            >
+              <p className="intentText">{activeTask?.userIntent ?? "从飞书群聊或上方输入框启动一次 IM 到 Docs / Slides 的协同任务。"}</p>
+              <PipelineOverview task={activeTask} />
+              <WorkflowRail task={activeTask} />
+              <StepTimeline task={activeTask} />
+            </Panel>
+
+            <div className="lowerGrid">
+              <Panel title="生成产物" label="Artifacts" icon={<Presentation size={18} />}>
+                <DeliveryStrip items={deliveryItems} />
+                <div className="artifactList">
+                  {activeTask?.artifacts.length ? (
+                    activeTask.artifacts.map((artifact) => <ArtifactRow artifact={artifact} key={artifact.id} />)
+                  ) : (
+                    <EmptyState text="Docs、Slides 和交付摘要生成后会出现在这里。" />
+                  )}
                 </div>
-                <Clock3 size={20} />
-              </div>
-              <div className="confirmList">
-                {confirmationItems.map((item) => (
-                  <div className={`confirmItem ${item.tone}`} key={item.title}>
-                    <span>{item.state}</span>
-                    <div>
-                      <strong>{item.title}</strong>
-                      <p>{item.description}</p>
+              </Panel>
+              <Panel title="同步事件" label="Realtime log" icon={<Activity size={18} />}>
+                <EventList events={taskEvents} />
+              </Panel>
+            </div>
+          </section>
+
+          <aside className="rightColumn">
+            <Panel title="飞书入口" label="IM / Mobile" icon={<Smartphone size={18} />}>
+              <div className="chatPreview">
+                <div className="chatPreviewTop">
+                  <span>校园活动报名系统讨论群</span>
+                  <Menu size={16} />
+                </div>
+                <div className="chatMessages">
+                  {sampleDiscussion.slice(0, 4).map((message) => (
+                    <div className={`chatBubble ${message.sender === "user" ? "mine" : ""}`} key={message.id}>
+                      {message.content}
                     </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-          <div className="dashboardGrid">
-            <div className="panel taskPanel">
-              <div className="panelHeader">
-                <div>
-                  <p className="eyebrow">Current Task</p>
-                  <h2>{activeTask?.title ?? "等待 IM 指令"}</h2>
+                  ))}
+                  <div className="chatBubble agent">/agent 请整理讨论，生成需求文档和汇报 PPT。</div>
                 </div>
-                {activeTask ? (
-                  <div className="taskBadges">
-                    <SourceBadge source={activeTask.source} />
-                    <TaskBadge status={activeTask.status} />
-                  </div>
-                ) : null}
               </div>
-              {activeTask ? (
-                <>
-                  <p className="intentText">{activeTask.userIntent}</p>
-                  <div className="stepList">
-                    {activeTask.plan?.steps.map((step) => (
-                      <div className="stepItem" key={step.id}>
-                        <div className={`stepIcon ${step.status}`}>
-                          {step.status === "completed" ? <CheckCircle2 size={16} /> : <Loader2 size={16} />}
-                        </div>
-                        <div>
-                          <strong>{step.title}</strong>
-                          <p>{step.outputSummary ?? step.expectedOutput}</p>
-                        </div>
-                      </div>
-                    )) ?? <p className="empty">Agent 计划生成后会显示在这里。</p>}
-                  </div>
-                </>
-              ) : (
-                <p className="empty">在左侧 IM 输入框发送示例指令，开始第一条 Agent 工作流。</p>
-              )}
-            </div>
+            </Panel>
 
-            <div className="panel commandPanel">
-              <div className="panelHeader compact">
-                <div>
-                  <p className="eyebrow">Follow-up</p>
-                  <h2>自然语言迭代</h2>
-                </div>
-                <Bot size={20} />
-              </div>
-              <textarea value={command} onChange={(event) => setCommand(event.target.value)} />
-              <button className="textButton" onClick={handleSendCommand} disabled={!activeTask}>
+            <Panel title="自然语言迭代" label="Follow-up" icon={<Bot size={18} />}>
+              <textarea className="followupInput" value={command} onChange={(event) => setCommand(event.target.value)} />
+              <button className="primaryButton full" type="button" onClick={handleSendCommand} disabled={!activeTask}>
                 <Send size={16} />
                 发送追加修改
               </button>
-              <div className="endpointPanel">
-                <div className="endpointHeader">
-                  <Settings2 size={16} />
-                  <strong>连接设置</strong>
-                  <span>{endpointConfig.source}</span>
-                </div>
-                <label>
-                  API 地址
-                  <input
-                    value={endpointDraft.apiBaseUrl}
-                    onChange={(event) =>
-                      setEndpointDraft((current) => ({ ...current, apiBaseUrl: event.target.value }))
-                    }
-                    placeholder="https://your-api.trycloudflare.com"
-                  />
-                </label>
-                <label>
-                  WS 地址
-                  <input
-                    value={endpointDraft.wsUrl}
-                    onChange={(event) =>
-                      setEndpointDraft((current) => ({ ...current, wsUrl: event.target.value }))
-                    }
-                    placeholder="wss://your-api.trycloudflare.com/ws"
-                  />
-                </label>
-                <div className="endpointActions">
-                  <button className="secondaryButton" type="button" onClick={handleEndpointReset}>
-                    重置
-                  </button>
-                  <button className="secondaryButton primary" type="button" onClick={handleEndpointSave}>
-                    应用
-                  </button>
-                </div>
-              </div>
-              <ReadinessPanel readiness={readiness} />
-            </div>
+            </Panel>
 
-            <div className="panel artifactsPanel">
-              <div className="panelHeader compact">
-                <div>
-                  <p className="eyebrow">Artifacts</p>
-                  <h2>生成产物</h2>
-                </div>
-              </div>
-              <div className="artifactList">
-                {activeTask?.artifacts.map((artifact) => (
-                  <ArtifactCard artifact={artifact} key={artifact.id} />
-                )) ?? <p className="empty">暂无产物。</p>}
-              </div>
-            </div>
-
-            <div className="panel eventPanel">
-              <div className="panelHeader compact">
-                <div>
-                  <p className="eyebrow">Realtime</p>
-                  <h2>同步事件</h2>
-                </div>
-              </div>
-              <div className="eventList">
-                {taskEvents.slice(-8).reverse().map((event) => (
-                  <div className="eventItem" key={event.id}>
-                    <div>
-                      <span>{event.type}</span>
-                      {typeof event.payload.message === "string" ? <p>{event.payload.message}</p> : null}
-                    </div>
-                    <time>{new Date(event.timestamp).toLocaleTimeString()}</time>
-                  </div>
+            <Panel title="下一步" label="Operator queue" icon={<Clock3 size={18} />}>
+              <div className="nextActionList">
+                {nextActions.map((item) => (
+                  <NextAction key={item.title} {...item} />
                 ))}
-                {!taskEvents.length ? <p className="empty">任务事件会实时推送到这里。</p> : null}
               </div>
-            </div>
-          </div>
+            </Panel>
+
+            <Panel title="运行检查" label="Readiness" icon={<ShieldCheck size={18} />}>
+              <ReadinessPanel readiness={readiness} />
+            </Panel>
+
+            <Panel title="连接设置" label="Endpoint" icon={<Settings2 size={18} />}>
+              <EndpointSettings
+                endpointConfig={endpointConfig}
+                endpointDraft={endpointDraft}
+                onDraftChange={setEndpointDraft}
+                onReset={handleEndpointReset}
+                onSave={handleEndpointSave}
+              />
+            </Panel>
+          </aside>
         </section>
       </section>
     </main>
   );
 }
 
-function PaneTitle(props: { icon: ReactNode; title: string; subtitle: string }) {
+function RunMetricCard(props: { label: string; value: string; detail: string; tone: "good" | "warn" | "neutral" }) {
   return (
-    <div className="paneTitle">
-      <div className="paneIcon">{props.icon}</div>
-      <div>
-        <h2>{props.title}</h2>
-        <p>{props.subtitle}</p>
-      </div>
-    </div>
-  );
-}
-
-function StatusRow(props: { label: string; value: string; detail: string; tone: "good" | "warn" | "neutral" }) {
-  return (
-    <div className={`statusRow ${props.tone}`}>
-      <div>
-        <strong>{props.label}</strong>
-        <p>{props.detail}</p>
-      </div>
-      <span>{props.value}</span>
-    </div>
-  );
-}
-
-function StatusPill(props: { label: string; value: string; tone: "good" | "warn" | "neutral" }) {
-  return (
-    <div className={`statusPill ${props.tone}`}>
+    <div className={`runMetricCard ${props.tone}`}>
       <span>{props.label}</span>
       <strong>{props.value}</strong>
+      <p>{props.detail}</p>
+    </div>
+  );
+}
+
+function MiniCheck(props: { label: string; ok: boolean }) {
+  return (
+    <div className={`miniCheck ${props.ok ? "good" : "warn"}`}>
+      <span>{props.ok ? "OK" : "待补"}</span>
+      <strong>{props.label}</strong>
+    </div>
+  );
+}
+
+function NavItem(props: { icon: ReactNode; label: string; active?: boolean }) {
+  return (
+    <button className={`navItem ${props.active ? "active" : ""}`} type="button">
+      {props.icon}
+      <span>{props.label}</span>
+    </button>
+  );
+}
+
+function Panel(props: { title: string; label: string; icon: ReactNode; children: ReactNode; action?: ReactNode }) {
+  return (
+    <section className="panel">
+      <div className="panelHeader">
+        <div className="panelTitle">
+          <div className="sectionIcon">{props.icon}</div>
+          <div>
+            <span>{props.label}</span>
+            <h2>{props.title}</h2>
+          </div>
+        </div>
+        {props.action}
+      </div>
+      {props.children}
+    </section>
+  );
+}
+
+function SceneCoverage(props: {
+  activeTask: Task | undefined;
+  connection: "connecting" | "live" | "offline";
+  readiness: ReadinessStatus | null;
+  runtimeConfig: RuntimeConfig | null;
+}) {
+  const items = buildSceneCoverage(props.activeTask, props.runtimeConfig, props.readiness, props.connection);
+
+  return (
+    <section className="sceneCoverage" aria-label="Agent-Pilot scenario coverage">
+      <div className="sceneCoverageLead">
+        <span>Scenario map</span>
+        <strong>A-F 场景覆盖</strong>
+      </div>
+      <div className="sceneCoverageTrack">
+        {items.map((item) => (
+          <div className={`sceneNode ${item.tone}`} key={item.id}>
+            <div className="sceneMark">
+              <span>{item.id}</span>
+              {item.icon}
+            </div>
+            <div>
+              <strong>{item.title}</strong>
+              <p>{item.state}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function PipelineOverview({ task }: { task: Task | undefined }) {
+  const total = task?.plan?.steps.length ?? 0;
+  const completed = task?.plan?.steps.filter((step) => step.status === "completed").length ?? 0;
+  const runningStep = task?.plan?.steps.find((step) => step.status === "running");
+  const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+  return (
+    <div className="pipelineOverview">
+      <div className="progressRing" style={{ "--progress": `${percent}%` } as CSSProperties}>
+        <span>{percent}</span>
+      </div>
+      <div>
+        <span>执行进度</span>
+        <strong>{runningStep?.title ?? (task ? "等待下一步状态" : "等待 IM 触发")}</strong>
+        <p>{total > 0 ? `${completed}/${total} 个步骤已完成` : "规划生成后会展示步骤进度、工具调用和产物状态。"}</p>
+      </div>
+    </div>
+  );
+}
+
+function WorkflowRail({ task }: { task: Task | undefined }) {
+  return (
+    <div className="workflowRail">
+      {workflowStages.map((stage, index) => {
+        const status = getStageStatus(task, stage.tool);
+        return (
+          <div className={`workflowStage ${status}`} key={stage.label}>
+            <div className="stageIcon">{stage.icon}</div>
+            <span>{stage.label}</span>
+            {index < workflowStages.length - 1 ? <ChevronRight size={16} /> : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function DeliveryStrip(props: { items: ReturnType<typeof buildDeliveryItems> }) {
+  return (
+    <div className="deliveryStrip">
+      {props.items.map((item) => (
+        <div className={`deliveryItem ${item.tone}`} key={item.label}>
+          <span>{item.label}</span>
+          <strong>{item.value}</strong>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function StepTimeline({ task }: { task: Task | undefined }) {
+  if (!task?.plan?.steps.length) {
+    return <EmptyState text="Agent 完成规划后，执行步骤会以流水线形式展开。" />;
+  }
+
+  return (
+    <div className="stepTimeline">
+      {task.plan.steps.map((step) => (
+        <div className="stepRow" key={step.id}>
+          <StepStateIcon status={step.status} />
+          <div>
+            <strong>{step.title}</strong>
+            <p>{step.outputSummary ?? step.expectedOutput}</p>
+          </div>
+          <span>{step.tool}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function StepStateIcon({ status }: { status: AgentStep["status"] }) {
+  if (status === "completed") return <div className="stateIcon completed"><Check size={14} /></div>;
+  if (status === "failed") return <div className="stateIcon failed"><XCircle size={14} /></div>;
+  if (status === "running") return <div className="stateIcon running"><Loader2 size={14} /></div>;
+  return <div className="stateIcon pending"><Circle size={14} /></div>;
+}
+
+function ArtifactRow({ artifact }: { artifact: Artifact }) {
+  const state = getArtifactLinkState(artifact);
+  const icon = artifact.type === "slides" ? <Presentation size={16} /> : <FileText size={16} />;
+  return (
+    <article className="artifactRow">
+      <div className="artifactType">{icon}</div>
+      <div>
+        <strong>{artifact.title}</strong>
+        <p>{artifact.type} · v{artifact.version} · {state.label}</p>
+      </div>
+      {artifact.url ? (
+        <a href={artifact.url} target="_blank" rel="noreferrer" aria-label={`打开 ${artifact.title}`}>
+          <ExternalLink size={16} />
+        </a>
+      ) : null}
+    </article>
+  );
+}
+
+function EventList({ events }: { events: AgentEvent[] }) {
+  const recentEvents = events.slice(-9).reverse();
+  if (!recentEvents.length) return <EmptyState text="任务事件会实时推送到这里。" />;
+
+  return (
+    <div className="eventList">
+      {recentEvents.map((event) => (
+        <div className="eventRow" key={event.id}>
+          <div>
+            <strong>{event.type}</strong>
+            {typeof event.payload.message === "string" ? <p>{event.payload.message}</p> : null}
+          </div>
+          <time>{new Date(event.timestamp).toLocaleTimeString()}</time>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function NextAction(props: { title: string; description: string; tone: "good" | "warn" | "neutral"; state: string }) {
+  return (
+    <div className={`nextAction ${props.tone}`}>
+      <span>{props.state}</span>
+      <div>
+        <strong>{props.title}</strong>
+        <p>{props.description}</p>
+      </div>
     </div>
   );
 }
 
 function ReadinessPanel({ readiness }: { readiness: ReadinessStatus | null }) {
   const checks = readiness?.checks ?? [];
-  const topChecks = checks.slice(0, 7);
+  if (!checks.length) return <EmptyState text="连接 Agent API 后会显示部署检查项。" />;
 
   return (
-    <div className="readinessPanel">
-      <div className="readinessHeader">
-        <strong>上线检查</strong>
-        <span className={readiness?.ok ? "good" : "warn"}>{readiness?.ok ? "ready" : "needs work"}</span>
-      </div>
-      <div className="readinessList">
-        {topChecks.map((check) => (
-          <div className={`readinessItem ${check.ok ? "good" : "warn"}`} key={check.id} title={check.detail}>
-            <span>{check.ok ? "通过" : check.required ? "必补" : "建议"}</span>
-            <div>
-              <strong>{check.label}{check.required ? "" : "（建议）"}</strong>
-              <p>{check.detail}</p>
-            </div>
+    <div className="readinessList">
+      {checks.slice(0, 8).map((check) => (
+        <div className={`readinessRow ${check.ok ? "good" : check.required ? "bad" : "warn"}`} key={check.id} title={check.detail}>
+          <span>{check.ok ? "OK" : check.required ? "P0" : "P1"}</span>
+          <div>
+            <strong>{check.label}</strong>
+            <p>{check.detail}</p>
           </div>
-        ))}
-        {!topChecks.length ? <p className="empty">连接 Agent API 后会显示部署检查项。</p> : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function EndpointSettings(props: {
+  endpointConfig: EndpointConfig;
+  endpointDraft: EndpointConfig;
+  onDraftChange: (next: EndpointConfig) => void;
+  onReset: () => void;
+  onSave: () => void;
+}) {
+  return (
+    <div className="endpointSettings">
+      <div className="endpointMode">
+        <span>当前来源</span>
+        <strong>{props.endpointConfig.source}</strong>
       </div>
+      <label>
+        API 地址
+        <input
+          value={props.endpointDraft.apiBaseUrl}
+          onChange={(event) => props.onDraftChange({ ...props.endpointDraft, apiBaseUrl: event.target.value })}
+          placeholder="https://agent-pilot.example.com"
+        />
+      </label>
+      <label>
+        WS 地址
+        <input
+          value={props.endpointDraft.wsUrl}
+          onChange={(event) => props.onDraftChange({ ...props.endpointDraft, wsUrl: event.target.value })}
+          placeholder="wss://agent-pilot.example.com/ws"
+        />
+      </label>
+      <div className="endpointActions">
+        <button className="ghostButton" type="button" onClick={props.onReset}>
+          <RotateCcw size={14} />
+          重置
+        </button>
+        <button className="ghostButton primary" type="button" onClick={props.onSave}>
+          应用
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function MetricPill(props: { label: string; value: string; tone: "good" | "warn" | "neutral" }) {
+  return (
+    <div className={`metricPill ${props.tone}`}>
+      <span>{props.label}</span>
+      <strong>{props.value}</strong>
     </div>
   );
 }
@@ -456,69 +649,12 @@ function TaskBadge(props: { status: Task["status"] }) {
   return <span className={`taskBadge ${props.status}`}>{props.status}</span>;
 }
 
-function SourceBadge(props: { source: Task["source"] }) {
-  const sourceLabel: Record<Task["source"], string> = {
-    im: "飞书 IM",
-    mobile: "移动端",
-    desktop: "Web 触发",
-    api: "API"
-  };
-  return <span className="sourceBadge">{sourceLabel[props.source]}</span>;
+function StatusDot({ state }: { state: "connecting" | "live" | "offline" }) {
+  return <span className={`statusDot ${state}`} />;
 }
 
-function DeliveryTile(props: { label: string; value: string; meta: string; tone: "good" | "warn" | "neutral"; icon: ReactNode }) {
-  return (
-    <div className={`deliveryTile ${props.tone}`}>
-      <div className="deliveryIcon">{props.icon}</div>
-      <div>
-        <strong>{props.label}</strong>
-        <span>{props.value}</span>
-        <p>{props.meta}</p>
-      </div>
-    </div>
-  );
-}
-
-function ArtifactCard({ artifact }: { artifact: Artifact }) {
-  const icon = artifact.type === "slides" ? <Presentation size={18} /> : <FileText size={18} />;
-  const linkState = getArtifactLinkState(artifact);
-  return (
-    <article className="artifactCard">
-      <div className="artifactIcon">{icon}</div>
-      <div>
-        <strong>{artifact.title}</strong>
-        <p>{artifact.type} · v{artifact.version} · {linkState.label}</p>
-        {artifact.url ? (
-          <a className="artifactLink" href={artifact.url} target="_blank" rel="noreferrer">
-            <ExternalLink size={14} />
-            打开产物
-          </a>
-        ) : null}
-        <pre>{artifact.content.slice(0, 420)}</pre>
-      </div>
-    </article>
-  );
-}
-
-function buildTriggerEntries(activeTask: Task | undefined, runtimeConfig: RuntimeConfig | null) {
-  const isWebTriggered = activeTask?.source === "desktop" || activeTask?.source === "api";
-  const larkConnected = runtimeConfig?.officeAdapter === "lark-cli" && runtimeConfig.hasLarkDefaultChatId;
-  const larkPendingConfig = runtimeConfig?.officeAdapter === "lark-cli" && !runtimeConfig.hasLarkDefaultChatId;
-
-  return [
-    {
-      label: "Web 触发",
-      value: isWebTriggered ? "当前入口" : "可用",
-      detail: activeTask ? `最近任务：${sourceText(activeTask.source)}` : "可在当前页面直接创建任务",
-      tone: isWebTriggered ? "good" : "neutral"
-    },
-    {
-      label: "飞书 IM 触发",
-      value: larkConnected ? "已接入" : larkPendingConfig ? "待配置群" : "待接入",
-      detail: larkConnected ? "可向默认群发送交付摘要" : "当前仍通过 Web 页面模拟/触发流程",
-      tone: larkConnected ? "good" : "warn"
-    }
-  ] as const;
+function EmptyState({ text }: { text: string }) {
+  return <p className="emptyState">{text}</p>;
 }
 
 function buildDeliveryItems(activeTask: Task | undefined) {
@@ -527,87 +663,165 @@ function buildDeliveryItems(activeTask: Task | undefined) {
   const summary = activeTask?.artifacts.find((artifact) => artifact.type === "summary" || artifact.type === "export");
 
   return [
-    buildDeliveryItem("Docs", doc, <FileText size={16} />),
-    buildDeliveryItem("Slides", slides, <Presentation size={16} />),
-    buildDeliveryItem("交付摘要", summary, <CheckCircle2 size={16} />)
+    { label: "Docs", artifact: doc },
+    { label: "Slides", artifact: slides },
+    { label: "交付摘要", artifact: summary }
+  ].map((item) => {
+    if (!item.artifact) return { ...item, value: "未生成", tone: "neutral" as const };
+    const state = getArtifactLinkState(item.artifact);
+    return { ...item, value: state.value, tone: state.tone };
+  });
+}
+
+function buildRunMetrics(
+  activeTask: Task | undefined,
+  readiness: ReadinessStatus | null,
+  events: AgentEvent[],
+  deliveryItems: ReturnType<typeof buildDeliveryItems>,
+  connection: "connecting" | "live" | "offline"
+) {
+  const totalSteps = activeTask?.plan?.steps.length ?? 0;
+  const completedSteps = activeTask?.plan?.steps.filter((step) => step.status === "completed").length ?? 0;
+  const requiredChecks = readiness?.checks.filter((check) => check.required) ?? [];
+  const readyChecks = requiredChecks.filter((check) => check.ok).length;
+  const totalChecks = requiredChecks.length;
+  const openedArtifacts = deliveryItems.filter((item) => item.value === "可打开").length;
+
+  return [
+    {
+      label: "Loop",
+      value: totalSteps ? `${completedSteps}/${totalSteps}` : "standby",
+      detail: activeTask?.status ?? "等待群聊或 Web 触发",
+      tone: activeTask?.status === "failed" ? "warn" as const : "neutral" as const
+    },
+    {
+      label: "Gates",
+      value: totalChecks ? `${readyChecks}/${totalChecks}` : "--",
+      detail: readiness?.ok ? "必需门禁已通过" : "等待 readiness",
+      tone: readiness?.ok ? "good" as const : "warn" as const
+    },
+    {
+      label: "Artifacts",
+      value: `${openedArtifacts}/3`,
+      detail: "Docs / Slides / 摘要",
+      tone: openedArtifacts >= 2 ? "good" as const : "neutral" as const
+    },
+    {
+      label: "Events",
+      value: `${events.length}`,
+      detail: connection === "live" ? "实时同步中" : "等待连接恢复",
+      tone: connection === "live" ? "good" as const : "warn" as const
+    }
   ];
 }
 
-function buildDeliveryItem(label: string, artifact: Artifact | undefined, icon: ReactNode) {
-  if (!artifact) {
-    return { label, value: "未生成", meta: "等待 Agent 步骤完成", tone: "neutral" as const, icon };
-  }
+function buildSceneCoverage(
+  activeTask: Task | undefined,
+  runtimeConfig: RuntimeConfig | null,
+  readiness: ReadinessStatus | null,
+  connection: "connecting" | "live" | "offline"
+) {
+  const hasArtifact = (type: Artifact["type"]) => activeTask?.artifacts.some((artifact) => artifact.type === type);
+  const hasDoc = hasArtifact("doc");
+  const hasSlides = hasArtifact("slides");
+  const hasSummary = activeTask?.artifacts.some((artifact) => artifact.type === "summary" || artifact.type === "export");
+  const requiredReady = readiness?.ok ?? false;
+  const planned = Boolean(activeTask?.plan?.steps.length);
 
-  const linkState = getArtifactLinkState(artifact);
-  return {
-    label,
-    value: linkState.value,
-    meta: `v${artifact.version} · ${formatTime(artifact.updatedAt)}`,
-    tone: linkState.tone,
-    icon
-  };
+  return sceneMeta.map((scene) => {
+    if (scene.id === "A") {
+      return {
+        ...scene,
+        state: runtimeConfig?.hasLarkDefaultChatId ? "测试群已配置" : "等待群配置",
+        tone: runtimeConfig?.hasLarkDefaultChatId ? "good" as const : "warn" as const
+      };
+    }
+    if (scene.id === "B") {
+      return {
+        ...scene,
+        state: planned ? "计划已生成" : runtimeConfig?.llmMode ? `${runtimeConfig.llmMode} 待触发` : "等待模型",
+        tone: planned || runtimeConfig?.llmMode === "doubao" ? "good" as const : "neutral" as const
+      };
+    }
+    if (scene.id === "C") {
+      return { ...scene, state: hasDoc ? "文档已生成" : "待生成", tone: hasDoc ? "good" as const : "neutral" as const };
+    }
+    if (scene.id === "D") {
+      return { ...scene, state: hasSlides ? "幻灯片已生成" : "待生成", tone: hasSlides ? "good" as const : "neutral" as const };
+    }
+    if (scene.id === "E") {
+      return {
+        ...scene,
+        state: connection === "live" ? "实时同步" : connection === "connecting" ? "连接中" : "离线",
+        tone: connection === "live" ? "good" as const : "warn" as const
+      };
+    }
+    return {
+      ...scene,
+      state: hasSummary ? "摘要已交付" : requiredReady ? "待交付" : "先补运行项",
+      tone: hasSummary ? "good" as const : requiredReady ? "neutral" as const : "warn" as const
+    };
+  });
 }
 
-function buildConfirmationItems(activeTask: Task | undefined, deliveryItems: ReturnType<typeof buildDeliveryItems>) {
+function buildNextActions(
+  activeTask: Task | undefined,
+  readiness: ReadinessStatus | null,
+  deliveryItems: ReturnType<typeof buildDeliveryItems>
+) {
+  const actions: Array<{ title: string; description: string; tone: "good" | "warn" | "neutral"; state: string }> = [];
+
   if (!activeTask) {
-    return [
-      {
-        title: "等待首个任务",
-        description: "从 Web 输入任务目标后，这里会显示需要人工确认的节点。",
-        state: "待触发",
-        tone: "neutral"
-      }
-    ] as const;
+    actions.push({
+      title: "等待 IM 或 Web 任务",
+      description: "飞书群聊触发后会同步到这里。",
+      tone: "neutral",
+      state: "待触发"
+    });
+  } else if (activeTask.status === "failed") {
+    actions.push({
+      title: "定位失败步骤",
+      description: activeTask.error ?? "查看事件日志并重新执行。",
+      tone: "warn",
+      state: "需处理"
+    });
+  } else if (activeTask.status === "completed") {
+    actions.push({
+      title: "打开 Docs / Slides 验证",
+      description: deliveryItems.every((item) => item.value === "可打开") ? "真实链接已生成。" : "仍有产物需要检查链接状态。",
+      tone: deliveryItems.every((item) => item.value === "可打开") ? "good" : "warn",
+      state: "验收"
+    });
+  } else {
+    actions.push({
+      title: "等待 Agent 执行完成",
+      description: "过程事件会实时刷新到流水线和事件日志。",
+      tone: "neutral",
+      state: "执行中"
+    });
   }
 
-  if (activeTask.status === "failed") {
-    return [
-      {
-        title: "确认失败原因",
-        description: activeTask.error ?? "查看实时事件后重新触发或调整输入。",
-        state: "需处理",
-        tone: "warn"
-      }
-    ] as const;
+  if (readiness?.checks.some((check) => !check.ok && !check.required)) {
+    actions.push({
+      title: "补齐建议项",
+      description: "机器人自身 ID 和事件安全项仍可继续强化。",
+      tone: "warn",
+      state: "建议"
+    });
   }
 
-  const required = activeTask.plan?.requiredConfirmations ?? [];
-  if (required.length) {
-    return required.slice(0, 3).map((item, index) => ({
-      title: item,
-      description: index === 0 ? "优先确认后再继续发送或迭代交付。" : "可在后续迭代中补充确认。",
-      state: activeTask.status === "completed" ? "待确认" : "排队中",
-      tone: activeTask.status === "completed" ? "warn" : "neutral"
-    }));
-  }
+  return actions;
+}
 
-  const hasMissingDelivery = deliveryItems.some((item) => item.value === "未生成");
-  return [
-    {
-      title: hasMissingDelivery ? "等待 Docs / Slides 生成完成" : "确认内容并决定是否发送飞书群",
-      description: hasMissingDelivery ? "Agent 完成交付步骤后会进入人工确认。" : "检查文档、PPT 和摘要链接，再进行下一轮修改或群内交付。",
-      state: hasMissingDelivery ? "进行中" : "待确认",
-      tone: hasMissingDelivery ? "neutral" : "warn"
-    }
-  ] as const;
+function getStageStatus(task: Task | undefined, tool: string) {
+  if (!task) return "pending";
+  if (tool === "planner" && task.plan) return "completed";
+  const step = task.plan?.steps.find((item) => item.tool === tool);
+  return step?.status ?? "pending";
 }
 
 function getArtifactLinkState(artifact: Artifact) {
   if (!artifact.url) return { label: "无链接", value: "内容已生成", tone: "warn" as const };
   if (artifact.url.startsWith("mock://")) return { label: "模拟链接", value: "模拟交付", tone: "warn" as const };
   return { label: "真实链接", value: "可打开", tone: "good" as const };
-}
-
-function sourceText(source: Task["source"]) {
-  const sourceLabel: Record<Task["source"], string> = {
-    im: "飞书 IM",
-    mobile: "移动端",
-    desktop: "Web 触发",
-    api: "API"
-  };
-  return sourceLabel[source];
-}
-
-function formatTime(value: string) {
-  return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }

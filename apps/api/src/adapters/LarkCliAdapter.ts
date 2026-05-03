@@ -17,9 +17,12 @@ export class LarkCliAdapter implements OfficeToolAdapter {
     private readonly defaultChatId?: string,
     options: LarkCliAdapterOptions = {}
   ) {
+    this.identity = options.identity ?? "bot";
     this.timeoutMs = options.timeoutMs ?? 45_000;
     this.readRetries = options.readRetries ?? 1;
   }
+
+  private readonly identity: "user" | "bot";
 
   async readMessages(chatId = this.defaultChatId): Promise<MessageContext> {
     if (!chatId) {
@@ -29,6 +32,7 @@ export class LarkCliAdapter implements OfficeToolAdapter {
     const output = await this.run(
       [
         "im", "+chat-messages-list",
+        "--as", this.identity,
         "--chat-id", chatId,
         "--page-size", "20",
         "--sort", "desc",
@@ -69,7 +73,7 @@ export class LarkCliAdapter implements OfficeToolAdapter {
 
     await this.run([
       "im", "+messages-send",
-      "--as", "user",
+      "--as", this.identity,
       "--chat-id", chatId,
       "--text", this.markdownToPlainText(input.markdown)
     ]);
@@ -85,7 +89,7 @@ export class LarkCliAdapter implements OfficeToolAdapter {
 
     const output = await this.run([
       "docs", "+create",
-      "--as", "user",
+      "--as", this.identity,
       "--title", input.title,
       "--markdown", `@./.tmp/${tmpFileName}`
     ]);
@@ -113,7 +117,7 @@ export class LarkCliAdapter implements OfficeToolAdapter {
 
     await this.run([
       "docs", "+update",
-      "--as", "user",
+      "--as", this.identity,
       "--doc", input.artifact.url,
       "--mode", "overwrite",
       "--markdown", `@./.tmp/${tmpFileName}`
@@ -130,7 +134,7 @@ export class LarkCliAdapter implements OfficeToolAdapter {
   async createSlides(input: CreateSlidesInput): Promise<Artifact> {
     const output = await this.run([
       "slides", "+create",
-      "--as", "user",
+      "--as", this.identity,
       "--title", input.title,
       "--slides", JSON.stringify(new SlidesXmlBuilder().build(input.markdown))
     ]);
@@ -364,6 +368,7 @@ export class LarkCliAdapter implements OfficeToolAdapter {
 }
 
 export interface LarkCliAdapterOptions {
+  identity?: "user" | "bot";
   timeoutMs?: number;
   readRetries?: number;
 }

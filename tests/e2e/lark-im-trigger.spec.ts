@@ -121,6 +121,13 @@ test.describe("Lark IM trigger API", () => {
     const artifactUrls = taskBody.task.artifacts.map((artifact: { url?: string }) => artifact.url).filter(Boolean);
     expect(artifactUrls.length).toBeGreaterThan(0);
     expect(artifactUrls.every((url: string) => url.startsWith("mock://"))).toBe(true);
+    expect(taskBody.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "tool.started" }),
+        expect.objectContaining({ type: "tool.completed" }),
+        expect.objectContaining({ type: "artifact.verified" })
+      ])
+    );
   });
 
   test("creates a task from a Lark event-shaped payload", async ({ request }) => {

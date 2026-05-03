@@ -94,6 +94,26 @@ npm run deploy:web:cloudflare
 npm run doctor:deploy
 ```
 
+比赛演示前检查本地 Agent API、readiness 和可选的 lark-cli 状态：
+
+```powershell
+npm run doctor:runtime
+```
+
+## 轻量云服务器稳定入口
+
+当前已经把项目部署到轻量云服务器，并使用免费 `sslip.io` 通配 DNS 与 Let's Encrypt HTTPS 证书：
+
+```text
+https://agent-pilot.47-236-122-49.sslip.io
+```
+
+飞书后台的机器人菜单“打开仪表盘”、网页应用桌面端主页、移动端主页可以优先填写这个地址。该入口同时托管 Web 仪表盘，并通过 Nginx 反向代理 `/api/*`、`/health` 和 `/ws` 到 Agent API。
+
+服务器运维记录见：
+
+- `轻量云服务器部署记录.md`
+
 如果后端仍在本地运行，可以用 Cloudflare Tunnel 暂时暴露 API：
 
 ```powershell
@@ -144,6 +164,17 @@ c8a7da53-a5b0-46c5-8182-425dea10df19
 它还没有绑定公网主机名，因此状态会显示 `inactive`。绑定 `api.your-domain.com -> http://localhost:8787` 后再启动稳定栈即可。
 
 如果要给评委远程长期访问，推荐 2 vCPU / 4 GB RAM 的轻量云服务器运行 API 和长连接桥接，再用 Cloudflare Tunnel 或服务器 Nginx/HTTPS 暴露入口。
+
+如果官方不提供服务器，项目不只剩“购买服务器 + 购买域名”一条路。当前保底路线是 Cloudflare Pages 固定前端入口，本地运行 Agent API 和飞书长连接，再通过 Quick Tunnel 或 Pages 边缘代理接入；低成本路线、风险和人工操作项见：
+
+- `低成本部署方案与人工操作清单.md`
+- `第四周期任务规划.md`
+
+正式演示前可以运行交付级诊断，脚本会生成 `.runtime/delivery-report.md`，列出自动检查结果和仍需你手工处理的事项：
+
+```powershell
+npm run doctor:delivery -- -SkipLarkCli
+```
 
 部署后的页面也支持运行时指定 API 地址：
 

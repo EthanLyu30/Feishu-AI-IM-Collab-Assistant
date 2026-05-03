@@ -50,29 +50,46 @@ export class AgentOrchestrator {
     };
     this.store.addAdHocStep(taskId, step);
     this.store.updateStep(taskId, step.id, { status: "running", startedAt: nowIso() });
+    const toolStartedAt = this.startTool(taskId, step);
 
-    const doc = task.artifacts.find((artifact) => artifact.type === "doc");
-    if (!doc) {
-      throw new Error("No document artifact found for follow-up command.");
+    try {
+      const doc = task.artifacts.find((artifact) => artifact.type === "doc");
+      if (!doc) {
+        throw new Error("No document artifact found for follow-up command.");
+      }
+
+      const updatedMarkdown = await this.composer.applyFollowUp(doc.content, command);
+      const updatedDoc = await this.office.updateDoc({
+        artifact: doc,
+        markdown: updatedMarkdown,
+        reason: command
+      });
+
+      this.store.upsertArtifact(taskId, updatedDoc);
+      const verification = this.verifyArtifact(taskId, updatedDoc);
+      this.store.updateStep(taskId, step.id, {
+        status: "completed",
+        completedAt: nowIso(),
+        outputSummary: `需求文档已根据用户指令完成更新。${verification.summary}`
+      });
+      this.completeTool(taskId, step, toolStartedAt, "需求文档自然语言迭代完成。", {
+        artifactId: updatedDoc.id,
+        verification
+      });
+      this.store.setStatus(taskId, "completed");
+
+      return this.store.getTask(taskId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Follow-up command failed.";
+      this.store.updateStep(taskId, step.id, {
+        status: "failed",
+        completedAt: nowIso(),
+        outputSummary: message
+      });
+      this.failTool(taskId, step, toolStartedAt, message);
+      this.store.setStatus(taskId, "failed", message);
+      throw error;
     }
-
-    const updatedMarkdown = await this.composer.applyFollowUp(doc.content, command);
-    const updatedDoc = await this.office.updateDoc({
-      artifact: doc,
-      markdown: updatedMarkdown,
-      reason: command
-    });
-
-    this.store.upsertArtifact(taskId, updatedDoc);
-    const verification = this.verifyArtifact(taskId, updatedDoc);
-    this.store.updateStep(taskId, step.id, {
-      status: "completed",
-      completedAt: nowIso(),
-      outputSummary: `需求文档已根据用户指令完成更新。${verification.summary}`
-    });
-    this.store.setStatus(taskId, "completed");
-
-    return this.store.getTask(taskId);
   }
 
   confirmTask(taskId: string, command = "确认执行") {
@@ -164,6 +181,7 @@ export class AgentOrchestrator {
   }
 
   private async executePlannedTask(taskId: string) {
+    let activeTool: ActiveTool | undefined;
     try {
       const task = this.store.getTask(taskId);
       if (!task) throw new Error("Task not found.");
@@ -183,6 +201,7 @@ export class AgentOrchestrator {
         }
 
         this.store.updateStep(taskId, step.id, { status: "running", startedAt: nowIso() });
+        activeTool = { step, startedAtMs: this.startTool(taskId, step) };
         await delay(500);
 
         if (step.tool === "im.read") {
@@ -191,6 +210,11 @@ export class AgentOrchestrator {
             completedAt: nowIso(),
             outputSummary: `已读取 ${context.chatName} 中的 ${context.messages.length} 条讨论消息。`
           });
+          this.completeTool(taskId, step, activeTool.startedAtMs, "IM 上下文读取完成。", {
+            messageCount: context.messages.length,
+            chatName: context.chatName
+          });
+          activeTool = undefined;
           continue;
         }
 
@@ -207,6 +231,11 @@ export class AgentOrchestrator {
             completedAt: nowIso(),
             outputSummary: `需求文档已生成。${verification.summary}`
           });
+          this.completeTool(taskId, step, activeTool.startedAtMs, "需求文档生成完成。", {
+            artifactId: docArtifact.id,
+            verification
+          });
+          activeTool = undefined;
           continue;
         }
 
@@ -223,6 +252,11 @@ export class AgentOrchestrator {
             completedAt: nowIso(),
             outputSummary: `5 页汇报 PPT 内容已生成。${verification.summary}`
           });
+          this.completeTool(taskId, step, activeTool.startedAtMs, "演示稿生成完成。", {
+            artifactId: slidesArtifact.id,
+            verification
+          });
+          activeTool = undefined;
           continue;
         }
 
@@ -245,6 +279,11 @@ export class AgentOrchestrator {
             completedAt: nowIso(),
             outputSummary: `汇报讲稿和优化建议已生成。${verification.summary}`
           });
+          this.completeTool(taskId, step, activeTool.startedAtMs, "汇报讲稿生成完成。", {
+            artifactId: rehearsalArtifact.id,
+            verification
+          });
+          activeTool = undefined;
           continue;
         }
 
@@ -277,6 +316,11 @@ export class AgentOrchestrator {
             completedAt: nowIso(),
             outputSummary: `交付摘要已生成。${verification.summary}`
           });
+          this.completeTool(taskId, step, activeTool.startedAtMs, "交付摘要回传完成。", {
+            artifactId: summary.id,
+            verification
+          });
+          activeTool = undefined;
           continue;
         }
 
@@ -285,6 +329,10 @@ export class AgentOrchestrator {
           completedAt: nowIso(),
           outputSummary: `暂未实现工具：${step.tool}`
         });
+        this.completeTool(taskId, step, activeTool.startedAtMs, `暂未实现工具：${step.tool}`, {
+          skipped: true
+        });
+        activeTool = undefined;
       }
 
       if (this.store.getTask(taskId)?.status !== "cancelled") {
@@ -292,6 +340,9 @@ export class AgentOrchestrator {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
+      if (activeTool) {
+        this.failTool(taskId, activeTool.step, activeTool.startedAtMs, message);
+      }
       this.store.setStatus(taskId, "failed", message);
       this.store.emit(taskId, "task.failed", { message });
     }
@@ -344,6 +395,49 @@ export class AgentOrchestrator {
     return verification;
   }
 
+  private startTool(taskId: string, step: { id: string; title: string; tool: string; inputSummary?: string }) {
+    const startedAtMs = Date.now();
+    this.store.emit(taskId, "tool.started", {
+      stepId: step.id,
+      tool: step.tool,
+      title: step.title,
+      inputSummary: step.inputSummary
+    });
+    return startedAtMs;
+  }
+
+  private completeTool(
+    taskId: string,
+    step: { id: string; title: string; tool: string },
+    startedAtMs: number,
+    outputSummary: string,
+    extra: Record<string, unknown> = {}
+  ) {
+    this.store.emit(taskId, "tool.completed", {
+      stepId: step.id,
+      tool: step.tool,
+      title: step.title,
+      durationMs: Date.now() - startedAtMs,
+      outputSummary,
+      ...extra
+    });
+  }
+
+  private failTool(
+    taskId: string,
+    step: { id: string; title: string; tool: string },
+    startedAtMs: number,
+    message: string
+  ) {
+    this.store.emit(taskId, "tool.failed", {
+      stepId: step.id,
+      tool: step.tool,
+      title: step.title,
+      durationMs: Date.now() - startedAtMs,
+      message
+    });
+  }
+
   private buildDeliveryMarkdown(artifacts: Artifact[], summary: Artifact) {
     const links = artifacts
       .filter((artifact) => artifact.url)
@@ -371,8 +465,11 @@ export class AgentOrchestrator {
       "需要你确认：",
       confirmations,
       "",
-      "请在群里回复“确认”或“继续”，我就开始生成正式交付物。"
-    ].join("\n");
+      plan.risks.length > 0 ? "我已识别的风险：" : "",
+      plan.risks.length > 0 ? plan.risks.map((item) => `- ${item}`).join("\n") : "",
+      "",
+      "可用指令：回复“确认/继续”开始执行，回复“进度”查看状态，回复“取消”终止任务。"
+    ].filter(Boolean).join("\n");
   }
 
   private buildProgressMarkdown(task: Task) {
@@ -396,4 +493,9 @@ export class AgentOrchestrator {
       task.status === "waiting_user" ? "当前正在等待群内回复“确认”或“取消”。" : "我会继续同步后续进展。"
     ].join("\n");
   }
+}
+
+interface ActiveTool {
+  step: { id: string; title: string; tool: string };
+  startedAtMs: number;
 }

@@ -133,7 +133,10 @@ app.get("/api/readiness", (_req, res) => {
       label: "飞书 Office Adapter",
       ok: office.name === "lark-cli",
       required: true,
-      detail: office.name === "lark-cli" ? "已使用 lark-cli 创建 Docs / Slides / 群回发。" : "当前使用 mock adapter。"
+      detail:
+        office.name === "lark-cli"
+          ? `已使用 lark-cli 创建 Docs / Slides / 群回发，执行身份：${config.larkCliActAs}。`
+          : "当前使用 mock adapter。"
     },
     {
       id: "chat",

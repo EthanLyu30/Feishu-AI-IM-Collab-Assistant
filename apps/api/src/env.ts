@@ -27,6 +27,7 @@ const envSchema = z.object({
   ARK_API_KEY: z.string().optional(),
   OFFICE_ADAPTER: z.enum(["mock", "lark-cli"]).default("mock"),
   LARK_CLI_BIN: z.string().default("lark-cli"),
+  LARK_CLI_ACT_AS: z.enum(["user", "bot"]).default("bot"),
   LARK_DEFAULT_CHAT_ID: z.string().optional(),
   LARK_EVENT_VERIFY_TOKEN: z.string().optional(),
   LARK_EVENT_ENCRYPT_KEY: z.string().optional(),
@@ -38,7 +39,7 @@ const envSchema = z.object({
   LARK_CLI_TIMEOUT_MS: z.coerce.number().default(45_000),
   LARK_CLI_READ_RETRIES: z.coerce.number().default(1),
   PUBLIC_API_BASE_URL: z.string().url().optional(),
-  PUBLIC_WEB_BASE_URL: z.string().url().optional(),
+  PUBLIC_WEB_BASE_URL: z.string().url().default("https://feishu-ai-im-collab-assistant.pages.dev"),
   ENABLE_TEST_ENDPOINTS: z.coerce.boolean().default(false)
 });
 
@@ -52,6 +53,7 @@ export const config = {
   arkApiKey: parsed.ARK_API_KEY,
   officeAdapter: parsed.OFFICE_ADAPTER,
   larkCliBin: parsed.LARK_CLI_BIN,
+  larkCliActAs: parsed.LARK_CLI_ACT_AS,
   larkDefaultChatId: parsed.LARK_DEFAULT_CHAT_ID,
   larkEventVerifyToken: parsed.LARK_EVENT_VERIFY_TOKEN,
   larkEventEncryptKey: parsed.LARK_EVENT_ENCRYPT_KEY,
