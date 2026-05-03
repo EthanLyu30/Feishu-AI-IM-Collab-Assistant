@@ -79,6 +79,29 @@ function Test-Url([string]$Url) {
   }
 }
 
+function Get-PublicReadiness([string]$BaseUrl) {
+  if (-not $BaseUrl) {
+    return $null
+  }
+
+  try {
+    $url = $BaseUrl.TrimEnd("/") + "/api/readiness"
+    $response = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 12
+    return $response.Content | ConvertFrom-Json
+  } catch {
+    return $null
+  }
+}
+
+function Test-ReadinessCheck($Readiness, [string]$Id) {
+  if (-not $Readiness -or -not $Readiness.checks) {
+    return $false
+  }
+
+  $check = $Readiness.checks | Where-Object { $_.id -eq $Id } | Select-Object -First 1
+  return [bool]($check -and $check.ok)
+}
+
 Invoke-Gate "typecheck" @("run", "typecheck")
 Invoke-Gate "build" @("run", "build")
 if (-not $SkipE2E) {
@@ -99,21 +122,6 @@ if (-not $SkipRuntime) {
 
 $envValues = Import-DotEnvValues
 
-if (($envValues["AGENT_LLM_MODE"] -ne "doubao") -or -not $envValues["ARK_ENDPOINT_ID"] -or -not $envValues["ARK_API_KEY"]) {
-  $manualActions.Add('确认 `.env` 中 `AGENT_LLM_MODE=doubao`，并填入 Ark Endpoint 与 API Key。') | Out-Null
-}
-if ($envValues["OFFICE_ADAPTER"] -ne "lark-cli") {
-  $manualActions.Add('确认 `.env` 中 `OFFICE_ADAPTER=lark-cli`，否则真实飞书 Docs / Slides 不会写入。') | Out-Null
-}
-if (-not $envValues["LARK_DEFAULT_CHAT_ID"]) {
-  $manualActions.Add('填写 `LARK_DEFAULT_CHAT_ID` 为比赛测试群会话 ID。') | Out-Null
-}
-if (-not $envValues["LARK_ALLOWED_CHAT_IDS"]) {
-  $manualActions.Add('真实演示前建议填写 `LARK_ALLOWED_CHAT_IDS`，限制只有测试群能触发 Agent。') | Out-Null
-}
-if (-not ($envValues["LARK_BOT_OPEN_ID"] -or $envValues["LARK_BOT_USER_ID"])) {
-  $manualActions.Add('建议填写 `LARK_BOT_OPEN_ID` 或 `LARK_BOT_USER_ID`，降低机器人自消息循环风险。') | Out-Null
-}
 $publicWebBaseUrl = $envValues["PUBLIC_WEB_BASE_URL"]
 if ($PublicWebUrl) {
   $publicWebBaseUrl = $PublicWebUrl
@@ -127,6 +135,35 @@ $publicWebOk = Test-Url $publicWebBaseUrl
 Add-Result "public web health" $publicWebOk $publicWebBaseUrl $false
 if (-not $publicWebOk) {
   $manualActions.Add("公网 Web 入口不可访问，请检查 Nginx、证书和服务器安全组。") | Out-Null
+}
+
+$publicReadiness = Get-PublicReadiness $publicWebBaseUrl
+if ($publicReadiness) {
+  Add-Result "public readiness" ([bool]$publicReadiness.ok) ($publicWebBaseUrl.TrimEnd("/") + "/api/readiness") $false
+} else {
+  Add-Result "public readiness" $false ($publicWebBaseUrl.TrimEnd("/") + "/api/readiness unavailable") $false
+}
+
+$llmReady = (Test-ReadinessCheck $publicReadiness "llm") -or (($envValues["AGENT_LLM_MODE"] -eq "doubao") -and $envValues["ARK_ENDPOINT_ID"] -and $envValues["ARK_API_KEY"])
+$officeReady = (Test-ReadinessCheck $publicReadiness "office") -or ($envValues["OFFICE_ADAPTER"] -eq "lark-cli")
+$chatReady = (Test-ReadinessCheck $publicReadiness "chat") -or $envValues["LARK_DEFAULT_CHAT_ID"]
+$allowedChatsReady = (Test-ReadinessCheck $publicReadiness "allowed-chats") -or $envValues["LARK_ALLOWED_CHAT_IDS"]
+$botFilterReady = (Test-ReadinessCheck $publicReadiness "bot-filter") -or $envValues["LARK_BOT_OPEN_ID"] -or $envValues["LARK_BOT_USER_ID"]
+
+if (-not $llmReady) {
+  $manualActions.Add('确认 `.env` 中 `AGENT_LLM_MODE=doubao`，并填入 Ark Endpoint 与 API Key。') | Out-Null
+}
+if (-not $officeReady) {
+  $manualActions.Add('确认 `.env` 中 `OFFICE_ADAPTER=lark-cli`，否则真实飞书 Docs / Slides 不会写入。') | Out-Null
+}
+if (-not $chatReady) {
+  $manualActions.Add('填写 `LARK_DEFAULT_CHAT_ID` 为比赛测试群会话 ID。') | Out-Null
+}
+if (-not $allowedChatsReady) {
+  $manualActions.Add('真实演示前建议填写 `LARK_ALLOWED_CHAT_IDS`，限制只有测试群能触发 Agent。') | Out-Null
+}
+if (-not $botFilterReady) {
+  $manualActions.Add('建议填写 `LARK_BOT_OPEN_ID` 或 `LARK_BOT_USER_ID`，降低机器人自消息循环风险。') | Out-Null
 }
 
 $pagesProxyState = Join-Path $runtimeDir "pages-proxy.json"
