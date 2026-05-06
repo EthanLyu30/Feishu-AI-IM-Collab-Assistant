@@ -34,8 +34,8 @@ export class ArtifactVerifier {
 
     if (characters < 600) warnings.push("需求文档内容偏短，建议补充业务背景、角色边界和验收标准。");
     if (headings < 4) warnings.push("需求文档标题层级偏少，建议拆出功能需求、非功能需求、权限边界和交付计划。");
-    if (!/权限|角色|学生|老师|管理员/.test(markdown)) {
-      warnings.push("需求文档暂未明显覆盖角色或权限边界。");
+    if (!/权限|角色|用户|成员|边界|role|permission|user/i.test(markdown)) {
+      warnings.push("需求文档建议明确角色或权限边界，便于后续 Agent 生成更精准的 PPT。");
     }
 
     return {
@@ -52,9 +52,9 @@ export class ArtifactVerifier {
     const warnings: string[] = [];
 
     if (slides < 5) warnings.push("Slides 页数少于 5 页，比赛汇报建议覆盖封面、痛点、方案、流程、价值与计划。");
-    if (characters < 400) warnings.push("Slides 内容偏短，可能导致飞书演示稿打开后信息密度不足。");
-    if (!/讲者备注|讲稿|演练|汇报/.test(markdown)) {
-      warnings.push("Slides 内容未明显包含讲者备注或汇报口径。");
+    if (characters < 500) warnings.push("Slides 内容偏短，可能导致飞书演示稿打开后信息密度不足。");
+    if (!/讲者备注[:：]/.test(markdown)) {
+      warnings.push("Slides 建议每页包含讲者备注（格式：讲者备注：...），便于排练和飞书 note 写入。");
     }
 
     return {

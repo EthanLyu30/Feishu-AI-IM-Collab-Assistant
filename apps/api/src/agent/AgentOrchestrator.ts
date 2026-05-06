@@ -4,12 +4,14 @@ import type { AgentLlm } from "../llm/AgentLlm";
 import { TaskStore } from "../state/TaskStore";
 import { createId, delay, nowIso } from "../utils/id";
 import { ArtifactVerifier } from "./ArtifactVerifier";
+import { Clarifier } from "./Clarifier";
 import { ContentComposer } from "./ContentComposer";
 import { Planner } from "./Planner";
 
 export class AgentOrchestrator {
   private planner: Planner;
   private composer: ContentComposer;
+  private clarifier: Clarifier;
   private verifier = new ArtifactVerifier();
 
   constructor(
@@ -19,6 +21,7 @@ export class AgentOrchestrator {
   ) {
     this.planner = new Planner(llm);
     this.composer = new ContentComposer(llm);
+    this.clarifier = new Clarifier(llm);
   }
 
   createTask(input: { intent: string; source: TaskSource; trigger?: TaskTrigger }) {
@@ -36,6 +39,39 @@ export class AgentOrchestrator {
   async handleCommand(taskId: string, command: string) {
     const task = this.store.getTask(taskId);
     if (!task) throw new Error("Task not found.");
+
+    const trimmed = command.trim();
+
+    // waiting_user: route to appropriate sub-handler
+    if (task.status === "waiting_user") {
+      if (/^(取消|cancel|stop)$/i.test(trimmed)) {
+        return this.cancelTask(taskId, command);
+      }
+      if (/^(确认|继续|ok|yes|confirm)$/i.test(trimmed)) {
+        if (!task.plan) {
+          const updatedIntent = `${task.userIntent}\n\n[用户确认无需补充] 按现有上下文继续规划和执行。`;
+          this.store.emit(taskId, "user.commanded", { command, kind: "clarification-confirm" });
+          this.store.updateTask(taskId, { userIntent: updatedIntent });
+          void this.runTask(taskId);
+          return this.store.getTask(taskId);
+        }
+        return this.confirmTask(taskId, command);
+      }
+      // Clarification response: append to intent and re-run planning
+      const updatedIntent = `${task.userIntent}\n\n[用户补充] ${command}`;
+      this.store.emit(taskId, "user.commanded", { command, kind: "clarification-response" });
+      this.store.updateTask(taskId, { userIntent: updatedIntent });
+      void this.runTask(taskId);
+      return this.store.getTask(taskId);
+    }
+
+    // failed: support retry
+    if (task.status === "failed" && /^(重试|retry)$/i.test(trimmed)) {
+      this.store.emit(taskId, "user.commanded", { command, kind: "retry" });
+      this.store.setStatus(taskId, "running");
+      void (task.plan ? this.executePlannedTask(taskId) : this.runTask(taskId));
+      return this.store.getTask(taskId);
+    }
 
     this.store.emit(taskId, "user.commanded", { command });
     this.store.setStatus(taskId, "running");
@@ -164,6 +200,14 @@ export class AgentOrchestrator {
 
       await delay(300);
       const context = await this.office.readMessages(task.trigger?.chatId);
+
+      // Proactive clarification check before planning
+      const clarification = await this.clarifier.check(task.userIntent, context);
+      if (clarification.needsClarification && clarification.questions.length > 0) {
+        await this.requestClarification(taskId, task, clarification.questions);
+        return;
+      }
+
       const plan = await this.planner.plan(task.userIntent, context);
       this.store.setPlan(taskId, plan);
 
@@ -343,9 +387,85 @@ export class AgentOrchestrator {
       if (activeTool) {
         this.failTool(taskId, activeTool.step, activeTool.startedAtMs, message);
       }
+      const suggestion = this.getRecoverySuggestion(activeTool?.step.tool, message);
       this.store.setStatus(taskId, "failed", message);
-      this.store.emit(taskId, "task.failed", { message });
+      this.store.emit(taskId, "task.failed", {
+        message,
+        failedStep: activeTool?.step.title,
+        failedTool: activeTool?.step.tool,
+        suggestion
+      });
+
+      const failedTask = this.store.getTask(taskId);
+      if (this.office.sendMessage && failedTask?.trigger?.chatId) {
+        try {
+          await this.office.sendMessage({
+            chatId: failedTask.trigger.chatId,
+            markdown: [
+              "Agent-Pilot 任务执行失败",
+              "",
+              `失败步骤：${activeTool?.step.title ?? "未知"}`,
+              `错误：${message}`,
+              "",
+              `恢复建议：${suggestion}`
+            ].join("\n")
+          });
+        } catch {
+          // ignore send failure during error handling
+        }
+      }
     }
+  }
+
+  private async requestClarification(taskId: string, task: Task, questions: string[]) {
+    const markdown = this.buildClarificationMarkdown(questions);
+    this.store.setStatus(taskId, "waiting_user");
+    this.store.emit(taskId, "task.waiting_confirmation", {
+      chatId: task.trigger?.chatId,
+      kind: "clarification",
+      questions,
+      message: markdown
+    });
+
+    if (!this.office.sendMessage) return;
+    try {
+      await this.office.sendMessage({ chatId: task.trigger?.chatId, markdown });
+    } catch (error) {
+      this.store.emit(taskId, "integration.warning", {
+        message: error instanceof Error ? error.message : "Failed to send clarification message."
+      });
+    }
+  }
+
+  private buildClarificationMarkdown(questions: string[]) {
+    return [
+      "Agent-Pilot 需要在开始前确认一些信息：",
+      "",
+      ...questions.map((q, i) => `${i + 1}. ${q}`),
+      "",
+      "请回复您的补充说明，Agent 收到后将继续规划和执行。",
+      "如果无需修改，回复【确认】即可跳过。"
+    ].join("\n");
+  }
+
+  private getRecoverySuggestion(tool: string | undefined, message: string): string {
+    if (!tool) return "请检查服务状态后，回复【重试】重新执行。";
+    if (message.toLowerCase().includes("auth") || message.includes("401") || message.includes("403")) {
+      return "认证失败。请重新运行 lark-cli auth login 完成飞书授权，然后回复【重试】。";
+    }
+    if (message.toLowerCase().includes("timeout")) {
+      return "请求超时。请检查网络连接，然后回复【重试】重新执行。";
+    }
+    if (tool === "doc.create" || tool === "doc.update") {
+      return "文档操作失败。请确认飞书授权有效且有 Docs 写入权限，然后回复【重试】。";
+    }
+    if (tool === "slides.create") {
+      return "PPT 创建失败。请确认 lark-cli 可用且有 Slides 权限，然后回复【重试】。";
+    }
+    if (tool === "im.read") {
+      return "消息读取失败。请检查群 ID 配置和飞书权限，然后回复【重试】。";
+    }
+    return "请回复【重试】重新执行失败步骤，或回复【取消】终止任务。";
   }
 
   private async requestConfirmation(taskId: string, task: Task, plan: AgentPlan) {

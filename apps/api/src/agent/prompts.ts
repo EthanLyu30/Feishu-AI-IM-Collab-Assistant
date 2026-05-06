@@ -64,18 +64,27 @@ export function buildDocPrompt(intent: string, context: MessageContext) {
 }
 
 export function buildSlidesPrompt(docMarkdown: string) {
+  const systemInstructions = [
+    "你是比赛汇报演示稿结构设计助手。请把需求文档转成 7-8 页中文 PPT 内容，使用 Markdown，不要输出代码块。",
+    "每页使用二级标题，标题格式为：## 第 N 页：页面标题",
+    "推荐页序：1.封面 2.背景与痛点 3.Agent解决方案 4.核心功能模块 5.角色权限 6.技术亮点 7.交付计划 8.总结",
+    "封面页：副标题说明核心价值，1-2 行。",
+    "背景与痛点：3-4 个具体问题，带数字量化。",
+    "Agent解决方案：飞书 IM 触发 -> Planner -> Doc/Slides -> 群回发的完整闭环。",
+    "核心功能模块：5-6 个要点，体现业务功能与 Agent 基础设施两个维度。",
+    "角色权限：明确区分 3 类角色及其操作范围。",
+    "技术亮点：豆包、飞书 API、WebSocket、低成本部署等，4-5 条。",
+    "交付计划：3-4 个阶段，每阶段有具体里程碑。",
+    "格式要求：每页包含 3-6 个短要点，每个要点不超过 28 个汉字，优先具体可量化。",
+    "每页末尾必须包含讲者备注，格式为：讲者备注：...（2-3 句具体讲解提示）",
+    "讲者备注要说明该页重点、数据支撑和演示时的切入角度。",
+    "内容要体现：AI Agent 是主驾驶、GUI 是辅助仪表盘；明确串联 IM、Docs、Slides；内容不要空泛，要有具体细节。"
+  ].join("\n");
+
   return [
     {
       role: "system" as const,
-      content:
-        [
-          "你是比赛汇报演示稿结构设计助手。请把需求文档转成 6 页中文 PPT 内容，使用 Markdown，不要输出代码块。",
-          "每页使用二级标题，标题格式为“## 第 N 页：页面标题”。",
-          "推荐页序：封面、背景痛点、Agent 方案、核心流程、角色权限、交付计划。",
-          "每页包含 3-4 个短要点，每个要点不超过 24 个汉字。",
-          "每页末尾必须包含“讲者备注：...”，用于 3 分钟排练。",
-          "内容要体现 AI Agent 是主驾驶、GUI 是辅助仪表盘，并明确串联 IM、Docs、Slides。"
-        ].join("\n")
+      content: systemInstructions
     },
     {
       role: "user" as const,

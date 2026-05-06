@@ -74,6 +74,7 @@ export function App() {
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [connection, setConnection] = useState<"connecting" | "live" | "offline">("connecting");
   const [error, setError] = useState<string | null>(null);
+  const [isRetrying, setIsRetrying] = useState(false);
 
   const apiWsUrl = useMemo(() => getRealtimeWsUrl(), [endpointConfig]);
   const activeTask = useMemo(
@@ -176,6 +177,20 @@ export function App() {
       setTasks((current) => current.map((item) => (item.id === task.id ? task : item)));
     } catch (err) {
       setError(err instanceof Error ? err.message : "指令发送失败");
+    }
+  }
+
+  async function handleRetry() {
+    if (!activeTask) return;
+    setError(null);
+    setIsRetrying(true);
+    try {
+      const task = await sendCommand(activeTask.id, { command: "重试" });
+      setTasks((current) => current.map((item) => (item.id === task.id ? task : item)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "重试失败");
+    } finally {
+      setIsRetrying(false);
     }
   }
 
@@ -295,7 +310,8 @@ export function App() {
               <p className="intentText">{activeTask?.userIntent ?? "从飞书群聊或上方输入框启动一次 IM 到 Docs / Slides 的协同任务。"}</p>
               <PipelineOverview task={activeTask} />
               <WorkflowRail task={activeTask} />
-              <StepTimeline task={activeTask} />
+              <ClarificationBanner task={activeTask} events={taskEvents} />
+              <StepTimeline task={activeTask} events={taskEvents} />
             </Panel>
 
             <div className="lowerGrid">
@@ -335,10 +351,18 @@ export function App() {
 
             <Panel title="自然语言迭代" label="Follow-up" icon={<Bot size={18} />}>
               <textarea className="followupInput" value={command} onChange={(event) => setCommand(event.target.value)} />
-              <button className="primaryButton full" type="button" onClick={handleSendCommand} disabled={!activeTask}>
-                <Send size={16} />
-                发送追加修改
-              </button>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <button className="primaryButton full" type="button" onClick={handleSendCommand} disabled={!activeTask}>
+                  <Send size={16} />
+                  发送追加修改
+                </button>
+                {activeTask?.status === "failed" && (
+                  <button className="ghostButton" type="button" onClick={handleRetry} disabled={isRetrying} title="重新执行失败的任务">
+                    <RotateCcw size={14} />
+                    {isRetrying ? "重试中" : "重试"}
+                  </button>
+                )}
+              </div>
             </Panel>
 
             <Panel title="下一步" label="Operator queue" icon={<Clock3 size={18} />}>
@@ -453,6 +477,20 @@ function PipelineOverview({ task }: { task: Task | undefined }) {
   const runningStep = task?.plan?.steps.find((step) => step.status === "running");
   const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
 
+  const currentLabel =
+    task?.status === "waiting_user"
+      ? "等待用户回复"
+      : task?.status === "failed"
+        ? "执行失败 — 可重试"
+        : task?.status === "completed"
+          ? "全部步骤已完成"
+          : runningStep?.title ?? (task ? "规划中" : "等待 IM 触发");
+
+  const subLabel =
+    total > 0
+      ? `${completed}/${total} 步骤完成${task?.status === "failed" ? " · 点击右侧【重试】恢复执行" : ""}`
+      : "规划生成后会展示步骤进度、工具调用和产物状态。";
+
   return (
     <div className="pipelineOverview">
       <div className="progressRing" style={{ "--progress": `${percent}%` } as CSSProperties}>
@@ -460,8 +498,8 @@ function PipelineOverview({ task }: { task: Task | undefined }) {
       </div>
       <div>
         <span>执行进度</span>
-        <strong>{runningStep?.title ?? (task ? "等待下一步状态" : "等待 IM 触发")}</strong>
-        <p>{total > 0 ? `${completed}/${total} 个步骤已完成` : "规划生成后会展示步骤进度、工具调用和产物状态。"}</p>
+        <strong style={task?.status === "failed" ? { color: "rgb(239,68,68)" } : task?.status === "waiting_user" ? { color: "rgb(59,130,246)" } : undefined}>{currentLabel}</strong>
+        <p>{subLabel}</p>
       </div>
     </div>
   );
@@ -497,23 +535,34 @@ function DeliveryStrip(props: { items: ReturnType<typeof buildDeliveryItems> }) 
   );
 }
 
-function StepTimeline({ task }: { task: Task | undefined }) {
+function StepTimeline({ task, events }: { task: Task | undefined; events: AgentEvent[] }) {
   if (!task?.plan?.steps.length) {
     return <EmptyState text="Agent 完成规划后，执行步骤会以流水线形式展开。" />;
   }
 
   return (
     <div className="stepTimeline">
-      {task.plan.steps.map((step) => (
-        <div className="stepRow" key={step.id}>
-          <StepStateIcon status={step.status} />
-          <div>
-            <strong>{step.title}</strong>
-            <p>{step.outputSummary ?? step.expectedOutput}</p>
+      {task.plan.steps.map((step) => {
+        const completedEvent = events.find(
+          (e) =>
+            e.type === "tool.completed" &&
+            (e.payload as Record<string, unknown>).stepId === step.id
+        );
+        const durationMs = completedEvent
+          ? ((completedEvent.payload as Record<string, unknown>).durationMs as number | undefined)
+          : undefined;
+        const durationLabel = durationMs != null ? ` · ${(durationMs / 1000).toFixed(1)}s` : "";
+        return (
+          <div className="stepRow" key={step.id}>
+            <StepStateIcon status={step.status} />
+            <div>
+              <strong>{step.title}</strong>
+              <p>{step.outputSummary ?? step.expectedOutput}</p>
+            </div>
+            <span style={{ whiteSpace: "nowrap" }}>{step.tool}{durationLabel}</span>
           </div>
-          <span>{step.tool}</span>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -544,21 +593,81 @@ function ArtifactRow({ artifact }: { artifact: Artifact }) {
   );
 }
 
+function ClarificationBanner({ task, events }: { task: Task | undefined; events: AgentEvent[] }) {
+  if (task?.status !== "waiting_user") return null;
+
+  const clarificationEvent = [...events]
+    .reverse()
+    .find(
+      (e) =>
+        e.type === "task.waiting_confirmation" &&
+        (e.payload as Record<string, unknown>).kind === "clarification"
+    );
+
+  if (!clarificationEvent) return null;
+  const questions = (clarificationEvent.payload as Record<string, unknown>).questions as string[] | undefined;
+  if (!questions?.length) return null;
+
+  return (
+    <div className="errorBanner" style={{ background: "rgb(239,246,255)", borderColor: "rgb(147,197,253)", color: "rgb(30,64,175)" }}>
+      <strong style={{ display: "block", marginBottom: "6px" }}>Agent 需要补充信息：</strong>
+      <ol style={{ margin: "0 0 8px 16px", padding: 0 }}>
+        {questions.map((q, i) => <li key={i}>{q}</li>)}
+      </ol>
+      <span style={{ fontSize: "12px", opacity: 0.8 }}>在右侧"自然语言迭代"中填写回复，点击发送后 Agent 继续执行。</span>
+    </div>
+  );
+}
+
+function eventTone(type: string): string {
+  if (type.includes("failed") || type.includes("error")) return "failed";
+  if (type.includes("warning")) return "warn";
+  if (type.includes("completed") || type.includes("delivered") || type.includes("planned")) return "good";
+  if (type.includes("started") || type.includes("running")) return "active";
+  return "neutral";
+}
+
 function EventList({ events }: { events: AgentEvent[] }) {
-  const recentEvents = events.slice(-9).reverse();
+  const recentEvents = events.slice(-12).reverse();
   if (!recentEvents.length) return <EmptyState text="任务事件会实时推送到这里。" />;
 
   return (
     <div className="eventList">
-      {recentEvents.map((event) => (
-        <div className="eventRow" key={event.id}>
-          <div>
-            <strong>{event.type}</strong>
-            {typeof event.payload.message === "string" ? <p>{event.payload.message}</p> : null}
+      {recentEvents.map((event) => {
+        const tone = eventTone(event.type);
+        const dotStyle: CSSProperties = {
+          width: 8,
+          height: 8,
+          borderRadius: "50%",
+          flexShrink: 0,
+          marginTop: 4,
+          background:
+            tone === "failed" ? "rgb(239,68,68)"
+            : tone === "warn" ? "rgb(245,158,11)"
+            : tone === "good" ? "rgb(34,197,94)"
+            : tone === "active" ? "rgb(59,130,246)"
+            : "rgb(148,163,184)"
+        };
+        const payload = event.payload as Record<string, unknown>;
+        const detail =
+          typeof payload.outputSummary === "string"
+            ? payload.outputSummary
+            : typeof payload.message === "string"
+              ? payload.message
+              : typeof payload.suggestion === "string"
+                ? `建议：${payload.suggestion}`
+                : null;
+        return (
+          <div className="eventRow" key={event.id} style={{ alignItems: "flex-start", gap: "8px" }}>
+            <span style={dotStyle} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <strong>{event.type}</strong>
+              {detail ? <p style={{ marginTop: 2, wordBreak: "break-word" }}>{detail}</p> : null}
+            </div>
+            <time>{new Date(event.timestamp).toLocaleTimeString()}</time>
           </div>
-          <time>{new Date(event.timestamp).toLocaleTimeString()}</time>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -781,9 +890,15 @@ function buildNextActions(
   } else if (activeTask.status === "failed") {
     actions.push({
       title: "定位失败步骤",
-      description: activeTask.error ?? "查看事件日志并重新执行。",
+      description: activeTask.error?.split("\n")[0] ?? "查看事件日志了解失败原因。",
       tone: "warn",
       state: "需处理"
+    });
+    actions.push({
+      title: "点击右侧【重试】按钮重新执行",
+      description: "Agent 将从当前计划继续重新运行，无需重新触发。",
+      tone: "neutral",
+      state: "恢复"
     });
   } else if (activeTask.status === "completed") {
     actions.push({

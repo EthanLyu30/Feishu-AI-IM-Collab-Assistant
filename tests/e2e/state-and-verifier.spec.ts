@@ -4,6 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Artifact } from "@agent-pilot/shared";
 import { ArtifactVerifier } from "../../apps/api/src/agent/ArtifactVerifier";
+import { Clarifier } from "../../apps/api/src/agent/Clarifier";
+import type { AgentLlm } from "../../apps/api/src/llm/AgentLlm";
+import { MockLlm } from "../../apps/api/src/llm/MockLlm";
 import { TaskStore } from "../../apps/api/src/state/TaskStore";
 
 test("persists tasks, events, and artifacts across TaskStore instances", () => {
@@ -90,4 +93,36 @@ test("verifies generated docs and slides with actionable warnings", () => {
     ok: true,
     warnings: []
   });
+});
+
+test("Clarifier returns no clarification needed in mock mode", async () => {
+  const llm = new MockLlm();
+  const clarifier = new Clarifier(llm);
+  const result = await clarifier.check("整理需求并生成汇报材料", {
+    source: "mock",
+    chatName: "测试群",
+    messages: [{ id: "m1", sender: "用户", content: "我们讨论了一个活动报名系统", timestamp: new Date().toISOString() }]
+  });
+  expect(result.needsClarification).toBe(false);
+  expect(result.questions).toHaveLength(0);
+});
+
+test("Clarifier bypasses repeated clarification after user supplement", async () => {
+  const llm: AgentLlm = {
+    mode: "doubao",
+    async completeText() {
+      return "";
+    },
+    async completeJson() {
+      throw new Error("Clarifier should not call LLM after explicit user supplement.");
+    }
+  };
+  const clarifier = new Clarifier(llm);
+  const result = await clarifier.check("整理需求\n\n[用户补充] 面向全校学生和老师", {
+    source: "mock",
+    chatName: "测试群",
+    messages: []
+  });
+
+  expect(result).toEqual({ needsClarification: false, questions: [] });
 });

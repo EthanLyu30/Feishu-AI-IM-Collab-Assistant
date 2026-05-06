@@ -317,6 +317,45 @@ test.describe("Lark IM trigger API", () => {
     });
   });
 
+  test("clarification response re-triggers planning when task is waiting_user", async ({ request }) => {
+    const trigger = await request.post("/api/triggers/lark-im", {
+      data: {
+        chatId: "oc_clarify",
+        messageId: "om_clarify_trigger",
+        sender: "ou_user",
+        text: "/agent 请整理本轮讨论，生成需求文档。"
+      }
+    });
+    expect(trigger.status()).toBe(202);
+    const { task } = await trigger.json();
+
+    await expect
+      .poll(async () => {
+        const r = await request.get(`/api/tasks/${task.id}`);
+        return (await r.json()).task.status;
+      }, { timeout: 12_000 })
+      .toBe("waiting_user");
+
+    // Send a non-standard command (treated as clarification response)
+    const cmdResponse = await request.post(`/api/tasks/${task.id}/commands`, {
+      data: { command: "系统面向全校学生，主要用于课外活动管理" }
+    });
+    expect(cmdResponse.status()).toBe(200);
+
+    // Task should re-run planning and eventually reach waiting_user again
+    await expect
+      .poll(async () => {
+        const r = await request.get(`/api/tasks/${task.id}`);
+        const body = await r.json();
+        return body.task.status;
+      }, { timeout: 12_000 })
+      .toMatch(/waiting_user|completed/);
+
+    // Intent should contain the supplement
+    const finalTask = await (await request.get(`/api/tasks/${task.id}`)).json();
+    expect(finalTask.task.userIntent).toContain("用户补充");
+  });
+
   test("documents the Lark raw body signature algorithm", () => {
     const timestamp = "1714272000";
     const nonce = "nonce-for-test";
