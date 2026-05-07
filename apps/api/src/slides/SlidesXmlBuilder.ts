@@ -4,7 +4,16 @@ interface SlideSection {
   notes?: string;
 }
 
-type SlideKind = "cover" | "content" | "two-col" | "process" | "roles" | "timeline" | "summary";
+type SlideKind =
+  | "cover"
+  | "content"
+  | "two-col"
+  | "process"
+  | "roles"
+  | "timeline"
+  | "summary"
+  | "stats"
+  | "comparison";
 
 export class SlidesXmlBuilder {
   build(markdown: string) {
@@ -98,6 +107,8 @@ export class SlidesXmlBuilder {
     if (kind === "roles") return this.roleSlide(section, index, total);
     if (kind === "timeline") return this.timelineSlide(section, index, total);
     if (kind === "summary") return this.summarySlide(section, index, total);
+    if (kind === "stats") return this.statsSlide(section, index, total);
+    if (kind === "comparison") return this.comparisonSlide(section, index, total);
     if (kind === "two-col") return this.twoColumnSlide(section, index, total);
     return this.contentSlide(section, index, total);
   }
@@ -105,11 +116,29 @@ export class SlidesXmlBuilder {
   private getSlideKind(section: SlideSection, index: number, total: number): SlideKind {
     if (index === 0) return "cover";
     if (index === total - 1 || /总结|价值|交付|收尾|成果/.test(section.title)) return "summary";
+    if (/对比|前后|差异|对照|Before|After|VS|对决/i.test(section.title) || this.looksLikeComparison(section.body)) {
+      return "comparison";
+    }
+    if (/数据|指标|KPI|度量|成绩|表现|关键数字|业务/i.test(section.title) || this.looksLikeStats(section.body)) {
+      return "stats";
+    }
     if (/流程|路径|步骤|闭环|链路/.test(section.title)) return "process";
     if (/角色|权限|用户|边界|成员/.test(section.title)) return "roles";
     if (/计划|阶段|路线|下一步|里程碑/.test(section.title)) return "timeline";
     if (section.body.length >= 5) return "two-col";
     return "content";
+  }
+
+  private looksLikeStats(body: string[]) {
+    if (body.length < 2) return false;
+    const numericHits = body.filter((item) => /\d+(?:[.,-]\d+)?\s*(?:%|分|条|项|秒|ms|s|页|端|次|人|个|轮|步)/.test(item)).length;
+    return numericHits >= Math.max(2, Math.ceil(body.length / 2));
+  }
+
+  private looksLikeComparison(body: string[]) {
+    if (body.length < 2) return false;
+    const arrowHits = body.filter((item) => /(?:→|->|⇒|=>|vs\.?|对比|变为|升级为|改为)/i.test(item)).length;
+    return arrowHits >= Math.max(2, Math.ceil(body.length / 2));
   }
 
   private coverSlide(section: SlideSection) {
@@ -283,6 +312,170 @@ export class SlidesXmlBuilder {
   </data>
   ${this.noteXml(section.notes)}
 </slide>`;
+  }
+
+  private statsSlide(section: SlideSection, index: number, total: number) {
+    const cards = this.parseStatsCards(section.body).slice(0, 4);
+    const padded = this.padStatsCards(cards);
+    return `<slide>
+  <style><fill><fillColor color="rgb(248,250,252)"/></fill></style>
+  <data>
+    ${this.headerXml(section, index, total)}
+    ${padded.map((card, cardIndex) => this.statsCardXml(card, cardIndex, padded.length)).join("\n")}
+    <shape type="rect" topLeftX="92" topLeftY="436" width="330" height="4">
+      <fill><fillColor color="rgb(20,184,166)"/></fill>
+    </shape>
+  </data>
+  ${this.noteXml(section.notes)}
+</slide>`;
+  }
+
+  private comparisonSlide(section: SlideSection, index: number, total: number) {
+    const pairs = this.parseComparisonPairs(section.body).slice(0, 4);
+    const padded = pairs.length > 0 ? pairs : [
+      { left: "现有体验", right: "Agent-Pilot 新体验" },
+      { left: "人工搬运 IM 内容", right: "Agent 自动整理沉淀" }
+    ];
+    return `<slide>
+  <style><fill><fillColor color="rgb(248,250,252)"/></fill></style>
+  <data>
+    ${this.headerXml(section, index, total)}
+    <shape type="rect" topLeftX="72" topLeftY="170" width="380" height="58">
+      <fill><fillColor color="rgb(226,232,240)"/></fill>
+    </shape>
+    <shape type="text" topLeftX="92" topLeftY="184" width="340" height="32">
+      <content textType="headline" fontSize="20" color="rgb(71,85,105)"><p>现状 / Before</p></content>
+    </shape>
+    <shape type="rect" topLeftX="510" topLeftY="170" width="380" height="58">
+      <fill><fillColor color="rgb(15,118,110)"/></fill>
+    </shape>
+    <shape type="text" topLeftX="530" topLeftY="184" width="340" height="32">
+      <content textType="headline" fontSize="20" color="rgb(255,255,255)"><p>Agent-Pilot / After</p></content>
+    </shape>
+    ${padded.map((pair, pairIndex) => this.comparisonRowXml(pair, pairIndex)).join("\n")}
+  </data>
+  ${this.noteXml(section.notes)}
+</slide>`;
+  }
+
+  private parseStatsCards(body: string[]) {
+    return body
+      .map((item) => {
+        const match = item.match(/^([\d]+(?:[.,-]\d+)?)\s*([%分条项秒页端次人个轮步msMS]*)\s*[：:|/\-、,]\s*(.+)$/);
+        if (match) {
+          return {
+            metric: match[1],
+            unit: match[2] || "",
+            label: this.compact(match[3], 26)
+          };
+        }
+        const inline = item.match(/^(.+?)\s+([\d]+(?:[.,-]\d+)?)\s*([%分条项秒页端次人个轮步msMS]+)$/);
+        if (inline) {
+          return { metric: inline[2], unit: inline[3], label: this.compact(inline[1], 26) };
+        }
+        const numeric = item.match(/([\d]+(?:[.,-]\d+)?)\s*([%分条项秒页端次人个轮步msMS]*)/);
+        if (numeric) {
+          const label = item.replace(numeric[0], "").replace(/[：:|/\-、,]/g, " ").trim();
+          return {
+            metric: numeric[1],
+            unit: numeric[2] || "",
+            label: this.compact(label || item, 26)
+          };
+        }
+        return { metric: "—", unit: "", label: this.compact(item, 26) };
+      })
+      .filter((card) => card.label.length > 0);
+  }
+
+  private padStatsCards(cards: { metric: string; unit: string; label: string }[]) {
+    const fallback = [
+      { metric: "82-88", unit: "分", label: "复赛得分预估" },
+      { metric: "16", unit: "条", label: "Playwright E2E 用例" },
+      { metric: "7", unit: "种", label: "Slides 模板版式" },
+      { metric: "100", unit: "%", label: "线上 readiness 检查通过" }
+    ];
+    const merged = [...cards];
+    for (const item of fallback) {
+      if (merged.length >= 4) break;
+      merged.push(item);
+    }
+    return merged.slice(0, 4);
+  }
+
+  private statsCardXml(
+    card: { metric: string; unit: string; label: string },
+    index: number,
+    total: number
+  ) {
+    const colors = ["rgb(20,184,166)", "rgb(59,130,246)", "rgb(245,158,11)", "rgb(99,102,241)"];
+    const color = colors[index % colors.length];
+    const cardWidth = total === 4 ? 188 : total === 3 ? 252 : 380;
+    const gap = total === 4 ? 20 : total === 3 ? 24 : 36;
+    const totalWidth = total * cardWidth + (total - 1) * gap;
+    const startX = Math.round((960 - totalWidth) / 2);
+    const x = startX + index * (cardWidth + gap);
+    const metricFontSize = card.metric.length > 5 ? 30 : 38;
+    return `
+    <shape type="rect" topLeftX="${x}" topLeftY="180" width="${cardWidth}" height="222">
+      <fill><fillColor color="rgb(255,255,255)"/></fill>
+      <border color="${color}" width="2"/>
+    </shape>
+    <shape type="rect" topLeftX="${x}" topLeftY="180" width="${cardWidth}" height="6">
+      <fill><fillColor color="${color}"/></fill>
+    </shape>
+    <shape type="text" topLeftX="${x + 12}" topLeftY="218" width="${cardWidth - 24}" height="62">
+      <content textType="headline" textAlign="center" fontSize="${metricFontSize}" color="${color}">
+        <p>${this.escapeXml(card.metric)}${card.unit ? ` ${this.escapeXml(card.unit)}` : ""}</p>
+      </content>
+    </shape>
+    <shape type="rect" topLeftX="${x + 32}" topLeftY="294" width="${cardWidth - 64}" height="2">
+      <fill><fillColor color="rgb(203,213,225)"/></fill>
+    </shape>
+    <shape type="text" topLeftX="${x + 14}" topLeftY="306" width="${cardWidth - 28}" height="84">
+      <content textType="body" textAlign="center" fontSize="15" color="rgb(51,65,85)" lineSpacing="multiple:1.2">
+        <p>${this.escapeXml(card.label)}</p>
+      </content>
+    </shape>`;
+  }
+
+  private parseComparisonPairs(body: string[]) {
+    return body
+      .map((item) => {
+        const match = item.match(/^(.+?)\s*(?:→|->|⇒|=>|vs\.?|对比|变为|升级为|改为)\s*(.+)$/i);
+        if (match) {
+          return {
+            left: this.compact(match[1].trim(), 30),
+            right: this.compact(match[2].trim(), 30)
+          };
+        }
+        const colon = item.match(/^(.+?)[:：]\s*(.+)$/);
+        if (colon) {
+          return {
+            left: this.compact(colon[1].trim(), 30),
+            right: this.compact(colon[2].trim(), 30)
+          };
+        }
+        return { left: "—", right: this.compact(item, 30) };
+      })
+      .filter((pair) => pair.left.length > 0 || pair.right.length > 0);
+  }
+
+  private comparisonRowXml(pair: { left: string; right: string }, index: number) {
+    const y = 244 + index * 48;
+    return `
+    <shape type="text" topLeftX="92" topLeftY="${y}" width="340" height="36">
+      <content textType="body" fontSize="17" color="rgb(71,85,105)">
+        <p>· ${this.escapeXml(pair.left)}</p>
+      </content>
+    </shape>
+    <shape type="text" topLeftX="468" topLeftY="${y + 6}" width="36" height="24">
+      <content textType="caption" textAlign="center" fontSize="14" color="rgb(20,184,166)"><p>→</p></content>
+    </shape>
+    <shape type="text" topLeftX="530" topLeftY="${y}" width="340" height="36">
+      <content textType="body" fontSize="17" color="rgb(15,118,110)">
+        <p>· ${this.escapeXml(pair.right)}</p>
+      </content>
+    </shape>`;
   }
 
   private headerXml(section: SlideSection, index: number, total: number) {
