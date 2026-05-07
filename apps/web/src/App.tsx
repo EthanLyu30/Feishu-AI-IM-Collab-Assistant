@@ -45,6 +45,20 @@ type SocketMessage =
   | { type: "snapshot"; tasks: Task[]; events: AgentEvent[] }
   | { type: "event"; tasks: Task[]; event: AgentEvent };
 
+type DashboardView = "overview" | "flow" | "artifacts" | "checks";
+
+const navItems: ReadonlyArray<{
+  view: DashboardView;
+  label: string;
+  caption: string;
+  icon: ReactNode;
+}> = [
+  { view: "overview", label: "运行台", caption: "All systems", icon: <LayoutDashboard size={18} /> },
+  { view: "flow", label: "流程", caption: "Pipeline", icon: <Activity size={18} /> },
+  { view: "artifacts", label: "产物", caption: "Artifacts", icon: <FileText size={18} /> },
+  { view: "checks", label: "检查", caption: "Readiness", icon: <ShieldCheck size={18} /> }
+];
+
 const workflowStages = [
   { tool: "im.read", label: "IM", icon: <MessageSquareText size={16} /> },
   { tool: "planner", label: "Plan", icon: <Bot size={16} /> },
@@ -75,6 +89,18 @@ export function App() {
   const [connection, setConnection] = useState<"connecting" | "live" | "offline">("connecting");
   const [error, setError] = useState<string | null>(null);
   const [isRetrying, setIsRetrying] = useState(false);
+  const [view, setView] = useState<DashboardView>("overview");
+  const showCommandDeck = view === "overview" || view === "flow";
+  const showSceneCoverage = view === "overview" || view === "flow";
+  const showPipelinePanel = view === "overview" || view === "flow";
+  const showArtifactsPanel = view === "overview" || view === "artifacts";
+  const showEventsPanel = view === "overview" || view === "flow";
+  const showLowerGrid = showArtifactsPanel || showEventsPanel;
+  const showChat = view === "overview";
+  const showFollowup = view === "overview" || view === "artifacts";
+  const showNextActions = view === "overview" || view === "checks";
+  const showReadiness = view === "overview" || view === "checks";
+  const showEndpoint = true;
 
   const apiWsUrl = useMemo(() => getRealtimeWsUrl(), [endpointConfig]);
   const activeTask = useMemo(
@@ -217,10 +243,16 @@ export function App() {
           </div>
         </div>
         <nav className="navItems">
-          <NavItem active icon={<LayoutDashboard size={18} />} label="运行台" />
-          <NavItem icon={<Activity size={18} />} label="流程" />
-          <NavItem icon={<FileText size={18} />} label="产物" />
-          <NavItem icon={<ShieldCheck size={18} />} label="检查" />
+          {navItems.map((item) => (
+            <NavItem
+              key={item.view}
+              icon={item.icon}
+              label={item.label}
+              caption={item.caption}
+              active={view === item.view}
+              onClick={() => setView(item.view)}
+            />
+          ))}
         </nav>
         <div className="navFoot">
           <StatusDot state={connection} />
@@ -228,12 +260,13 @@ export function App() {
         </div>
       </aside>
 
-      <section className="workbench">
+      <section className={`workbench view-${view}`}>
         <header className="headerBar">
           <div>
             <div className="pageKicker">
               <span>Agent-Pilot Console</span>
               <span>Feishu Office Loop</span>
+              <span className="kickerView">{viewLabel(view)}</span>
             </div>
             <h1>飞书协同 Agent 运行台</h1>
             <p>IM 触发，Agent 编排，Docs / Slides / 群回发统一观测。</p>
@@ -247,6 +280,7 @@ export function App() {
 
         {error ? <div className="errorBanner">{error}</div> : null}
 
+        {showCommandDeck ? (
         <section className="commandDeck">
           <div className="deckMain">
             <div className="deckTopline">
@@ -291,106 +325,134 @@ export function App() {
             </div>
           </div>
         </section>
+        ) : null}
 
-        <SceneCoverage
-          activeTask={activeTask}
-          connection={connection}
-          readiness={readiness}
-          runtimeConfig={runtimeConfig}
-        />
+        {showSceneCoverage ? (
+          <SceneCoverage
+            activeTask={activeTask}
+            connection={connection}
+            readiness={readiness}
+            runtimeConfig={runtimeConfig}
+          />
+        ) : null}
 
         <section className="contentGrid">
           <section className="mainColumn">
-            <Panel
-              title={activeTask?.title ?? "等待任务"}
-              label="Current pipeline"
-              icon={<Gauge size={18} />}
-              action={activeTask ? <TaskBadge status={activeTask.status} /> : null}
-            >
-              <p className="intentText">{activeTask?.userIntent ?? "从飞书群聊或上方输入框启动一次 IM 到 Docs / Slides 的协同任务。"}</p>
-              <PipelineOverview task={activeTask} />
-              <WorkflowRail task={activeTask} />
-              <ClarificationBanner task={activeTask} events={taskEvents} />
-              <StepTimeline task={activeTask} events={taskEvents} />
-            </Panel>
+            {showPipelinePanel ? (
+              <Panel
+                title={activeTask?.title ?? "等待任务"}
+                label="Current pipeline"
+                icon={<Gauge size={18} />}
+                action={activeTask ? <TaskBadge status={activeTask.status} /> : null}
+              >
+                <p className="intentText">{activeTask?.userIntent ?? "从飞书群聊或上方输入框启动一次 IM 到 Docs / Slides 的协同任务。"}</p>
+                <PipelineOverview task={activeTask} />
+                <WorkflowRail task={activeTask} />
+                <ClarificationBanner task={activeTask} events={taskEvents} />
+                <StepTimeline task={activeTask} events={taskEvents} />
+              </Panel>
+            ) : null}
 
-            <div className="lowerGrid">
-              <Panel title="生成产物" label="Artifacts" icon={<Presentation size={18} />}>
-                <DeliveryStrip items={deliveryItems} />
-                <div className="artifactList">
-                  {activeTask?.artifacts.length ? (
-                    activeTask.artifacts.map((artifact) => <ArtifactRow artifact={artifact} key={artifact.id} />)
-                  ) : (
-                    <EmptyState text="Docs、Slides 和交付摘要生成后会出现在这里。" />
-                  )}
-                </div>
-              </Panel>
-              <Panel title="同步事件" label="Realtime log" icon={<Activity size={18} />}>
-                <EventList events={taskEvents} />
-              </Panel>
-            </div>
+            {showLowerGrid ? (
+              <div className="lowerGrid">
+                {showArtifactsPanel ? (
+                  <Panel title="生成产物" label="Artifacts" icon={<Presentation size={18} />}>
+                    <DeliveryStrip items={deliveryItems} />
+                    <div className="artifactList">
+                      {activeTask?.artifacts.length ? (
+                        activeTask.artifacts.map((artifact) => <ArtifactRow artifact={artifact} key={artifact.id} />)
+                      ) : (
+                        <EmptyState text="Docs、Slides 和交付摘要生成后会出现在这里。" />
+                      )}
+                    </div>
+                  </Panel>
+                ) : null}
+                {showEventsPanel ? (
+                  <Panel title="同步事件" label="Realtime log" icon={<Activity size={18} />}>
+                    <EventList events={taskEvents} />
+                  </Panel>
+                ) : null}
+              </div>
+            ) : null}
           </section>
 
           <aside className="rightColumn">
-            <Panel title="飞书入口" label="IM / Mobile" icon={<Smartphone size={18} />}>
-              <div className="chatPreview">
-                <div className="chatPreviewTop">
-                  <span>校园活动报名系统讨论群</span>
-                  <Menu size={16} />
+            {showChat ? (
+              <Panel title="飞书入口" label="IM / Mobile" icon={<Smartphone size={18} />}>
+                <div className="chatPreview">
+                  <div className="chatPreviewTop">
+                    <span>校园活动报名系统讨论群</span>
+                    <Menu size={16} />
+                  </div>
+                  <div className="chatMessages">
+                    {sampleDiscussion.slice(0, 4).map((message) => (
+                      <div className={`chatBubble ${message.sender === "user" ? "mine" : ""}`} key={message.id}>
+                        {message.content}
+                      </div>
+                    ))}
+                    <div className="chatBubble agent">/agent 请整理讨论，生成需求文档和汇报 PPT。</div>
+                  </div>
                 </div>
-                <div className="chatMessages">
-                  {sampleDiscussion.slice(0, 4).map((message) => (
-                    <div className={`chatBubble ${message.sender === "user" ? "mine" : ""}`} key={message.id}>
-                      {message.content}
-                    </div>
-                  ))}
-                  <div className="chatBubble agent">/agent 请整理讨论，生成需求文档和汇报 PPT。</div>
-                </div>
-              </div>
-            </Panel>
+              </Panel>
+            ) : null}
 
-            <Panel title="自然语言迭代" label="Follow-up" icon={<Bot size={18} />}>
-              <textarea className="followupInput" value={command} onChange={(event) => setCommand(event.target.value)} />
-              <div style={{ display: "flex", gap: "8px" }}>
-                <button className="primaryButton full" type="button" onClick={handleSendCommand} disabled={!activeTask}>
-                  <Send size={16} />
-                  发送追加修改
-                </button>
-                {activeTask?.status === "failed" && (
-                  <button className="ghostButton" type="button" onClick={handleRetry} disabled={isRetrying} title="重新执行失败的任务">
-                    <RotateCcw size={14} />
-                    {isRetrying ? "重试中" : "重试"}
+            {showFollowup ? (
+              <Panel title="自然语言迭代" label="Follow-up" icon={<Bot size={18} />}>
+                <textarea className="followupInput" value={command} onChange={(event) => setCommand(event.target.value)} />
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <button className="primaryButton full" type="button" onClick={handleSendCommand} disabled={!activeTask}>
+                    <Send size={16} />
+                    发送追加修改
                   </button>
-                )}
-              </div>
-            </Panel>
+                  {activeTask?.status === "failed" && (
+                    <button className="ghostButton" type="button" onClick={handleRetry} disabled={isRetrying} title="重新执行失败的任务">
+                      <RotateCcw size={14} />
+                      {isRetrying ? "重试中" : "重试"}
+                    </button>
+                  )}
+                </div>
+              </Panel>
+            ) : null}
 
-            <Panel title="下一步" label="Operator queue" icon={<Clock3 size={18} />}>
-              <div className="nextActionList">
-                {nextActions.map((item) => (
-                  <NextAction key={item.title} {...item} />
-                ))}
-              </div>
-            </Panel>
+            {showNextActions ? (
+              <Panel title="下一步" label="Operator queue" icon={<Clock3 size={18} />}>
+                <div className="nextActionList">
+                  {nextActions.map((item) => (
+                    <NextAction key={item.title} {...item} />
+                  ))}
+                </div>
+              </Panel>
+            ) : null}
 
-            <Panel title="运行检查" label="Readiness" icon={<ShieldCheck size={18} />}>
-              <ReadinessPanel readiness={readiness} />
-            </Panel>
+            {showReadiness ? (
+              <Panel title="运行检查" label="Readiness" icon={<ShieldCheck size={18} />}>
+                <ReadinessPanel readiness={readiness} />
+              </Panel>
+            ) : null}
 
-            <Panel title="连接设置" label="Endpoint" icon={<Settings2 size={18} />}>
-              <EndpointSettings
-                endpointConfig={endpointConfig}
-                endpointDraft={endpointDraft}
-                onDraftChange={setEndpointDraft}
-                onReset={handleEndpointReset}
-                onSave={handleEndpointSave}
-              />
-            </Panel>
+            {showEndpoint ? (
+              <Panel title="连接设置" label="Endpoint" icon={<Settings2 size={18} />}>
+                <EndpointSettings
+                  endpointConfig={endpointConfig}
+                  endpointDraft={endpointDraft}
+                  onDraftChange={setEndpointDraft}
+                  onReset={handleEndpointReset}
+                  onSave={handleEndpointSave}
+                />
+              </Panel>
+            ) : null}
           </aside>
         </section>
       </section>
     </main>
   );
+}
+
+function viewLabel(view: DashboardView) {
+  if (view === "overview") return "Overview";
+  if (view === "flow") return "Pipeline";
+  if (view === "artifacts") return "Artifacts";
+  return "Readiness";
 }
 
 function RunMetricCard(props: { label: string; value: string; detail: string; tone: "good" | "warn" | "neutral" }) {
@@ -412,11 +474,25 @@ function MiniCheck(props: { label: string; ok: boolean }) {
   );
 }
 
-function NavItem(props: { icon: ReactNode; label: string; active?: boolean }) {
+function NavItem(props: {
+  icon: ReactNode;
+  label: string;
+  caption?: string;
+  active?: boolean;
+  onClick?: () => void;
+}) {
   return (
-    <button className={`navItem ${props.active ? "active" : ""}`} type="button">
-      {props.icon}
-      <span>{props.label}</span>
+    <button
+      className={`navItem ${props.active ? "active" : ""}`}
+      type="button"
+      aria-pressed={props.active ? "true" : "false"}
+      onClick={props.onClick}
+    >
+      <span className="navIcon">{props.icon}</span>
+      <span className="navLabel">
+        <strong>{props.label}</strong>
+        {props.caption ? <small>{props.caption}</small> : null}
+      </span>
     </button>
   );
 }
