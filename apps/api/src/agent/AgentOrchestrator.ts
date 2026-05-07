@@ -293,10 +293,29 @@ export class AgentOrchestrator {
 
         if (step.tool === "slides.create") {
           const markdown = await this.composer.createSlides(docArtifact?.content ?? "");
-          slidesArtifact = await this.office.createSlides({
-            title: "校园活动报名系统汇报 PPT",
-            markdown
-          });
+          try {
+            slidesArtifact = await this.office.createSlides({
+              title: "校园活动报名系统汇报 PPT",
+              markdown
+            });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "Slides creation failed.";
+            this.store.emit(taskId, "integration.warning", {
+              message:
+                "飞书 Slides 创建失败，已保留仪表盘内演示稿草稿并继续执行讲稿和交付摘要。真实 Slides 演示前请在飞书开放平台开通 slides:presentation:create 权限。",
+              originalError: message
+            });
+            slidesArtifact = {
+              id: createId("slides"),
+              type: "slides",
+              title: "校园活动报名系统汇报 PPT 草稿",
+              version: 1,
+              content: markdown,
+              url: "mock://slides/degraded",
+              createdBy: "agent",
+              updatedAt: nowIso()
+            };
+          }
           this.store.upsertArtifact(taskId, slidesArtifact);
           const verification = this.verifyArtifact(taskId, slidesArtifact);
           this.store.updateStep(taskId, step.id, {
