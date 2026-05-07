@@ -1,4 +1,12 @@
-import type { AgentPlan, Artifact, Task, TaskSource, TaskTrigger } from "@agent-pilot/shared";
+import {
+  sampleDiscussion,
+  type AgentPlan,
+  type Artifact,
+  type MessageContext,
+  type Task,
+  type TaskSource,
+  type TaskTrigger
+} from "@agent-pilot/shared";
 import type { OfficeToolAdapter } from "../adapters/OfficeToolAdapter";
 import type { AgentLlm } from "../llm/AgentLlm";
 import { TaskStore } from "../state/TaskStore";
@@ -199,7 +207,7 @@ export class AgentOrchestrator {
       if (!task) throw new Error("Task not found.");
 
       await delay(300);
-      const context = await this.office.readMessages(task.trigger?.chatId);
+      const context = await this.readTaskContext(task, "planning");
 
       // Proactive clarification check before planning
       const clarification = await this.clarifier.check(task.userIntent, context);
@@ -233,7 +241,7 @@ export class AgentOrchestrator {
       if (!plan) throw new Error("Task plan is required before execution.");
 
       this.store.setStatus(taskId, "running");
-      const context = await this.office.readMessages(task.trigger?.chatId);
+      const context = await this.readTaskContext(task, "execution");
 
       let docArtifact: Artifact | undefined;
       let slidesArtifact: Artifact | undefined;
@@ -434,6 +442,38 @@ export class AgentOrchestrator {
       this.store.emit(taskId, "integration.warning", {
         message: error instanceof Error ? error.message : "Failed to send clarification message."
       });
+    }
+  }
+
+  private async readTaskContext(task: Task, phase: "planning" | "execution"): Promise<MessageContext> {
+    try {
+      return await this.office.readMessages(task.trigger?.chatId);
+    } catch (error) {
+      const originalError = error instanceof Error ? error.message : "Unknown chat read error";
+      const isBotOutOfChat = originalError.includes("Bot/User can NOT be out of the chat");
+      const guidance = isBotOutOfChat
+        ? "飞书机器人不在当前配置的测试群内，或 LARK_DEFAULT_CHAT_ID 已不是机器人所在群。"
+        : "读取飞书群聊上下文失败。";
+
+      this.store.emit(task.id, "integration.warning", {
+        message: `${guidance} 已降级使用当前任务指令和内置样例讨论继续生成产物，真实 IM 演示前请重新把机器人加入测试群并核对 chat_id。`,
+        phase,
+        originalError
+      });
+
+      return {
+        source: "mock",
+        chatName: "Web 输入降级上下文",
+        messages: [
+          ...sampleDiscussion,
+          {
+            id: createId("msg"),
+            sender: "user",
+            content: task.userIntent,
+            timestamp: nowIso()
+          }
+        ]
+      };
     }
   }
 
