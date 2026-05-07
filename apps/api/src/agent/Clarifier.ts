@@ -7,6 +7,8 @@ const clarificationSchema = z.object({
   questions: z.array(z.string()).default([])
 });
 
+const CLARIFICATION_TIMEOUT_MS = 8_000;
+
 export type ClarificationResult = z.infer<typeof clarificationSchema>;
 
 export class Clarifier {
@@ -19,33 +21,36 @@ export class Clarifier {
     if (this.llm.mode !== "doubao") return { needsClarification: false, questions: [] };
 
     try {
-      const raw = await this.llm.completeJson<unknown>(
-        [
-          {
-            role: "system" as const,
-            content: [
-              "你是 Agent-Pilot 的意图评估器。",
-              "判断用户指令是否足够明确，可以直接生成需求文档和 PPT。",
-              "若明确（有具体主题、场景或功能描述），输出 { needsClarification: false, questions: [] }。",
-              "若不明确（只有【帮我整理一下】等模糊指令），输出最多 2 个关键澄清问题。",
-              "问题应具体：例如【您想整理哪方面内容？】【目标受众是谁？】【是否需要 PPT？】。",
-              "必须输出 JSON，不要输出 Markdown 或解释性文字。"
-            ].join("\n")
-          },
-          {
-            role: "user" as const,
-            content: JSON.stringify(
-              {
-                intent,
-                contextMessages: context.messages.slice(0, 6).map((m) => m.content),
-                outputSchema: { needsClarification: "boolean", questions: ["string，最多 2 条"] }
-              },
-              null,
-              2
-            )
-          }
-        ],
-        { temperature: 0.1 }
+      const raw = await this.withTimeout(
+        this.llm.completeJson<unknown>(
+          [
+            {
+              role: "system" as const,
+              content: [
+                "你是 Agent-Pilot 的意图评估器。",
+                "判断用户指令是否足够明确，可以直接生成需求文档和 PPT。",
+                "若明确（有具体主题、场景或功能描述），输出 { needsClarification: false, questions: [] }。",
+                "若不明确（只有【帮我整理一下】等模糊指令），输出最多 2 个关键澄清问题。",
+                "问题应具体：例如【您想整理哪方面内容？】【目标受众是谁？】【是否需要 PPT？】。",
+                "必须输出 JSON，不要输出 Markdown 或解释性文字。"
+              ].join("\n")
+            },
+            {
+              role: "user" as const,
+              content: JSON.stringify(
+                {
+                  intent,
+                  contextMessages: context.messages.slice(0, 6).map((m) => m.content),
+                  outputSchema: { needsClarification: "boolean", questions: ["string，最多 2 条"] }
+                },
+                null,
+                2
+              )
+            }
+          ],
+          { temperature: 0.1 }
+        ),
+        CLARIFICATION_TIMEOUT_MS
       );
 
       const parsed = clarificationSchema.safeParse(raw);
@@ -57,5 +62,14 @@ export class Clarifier {
     } catch {
       return { needsClarification: false, questions: [] };
     }
+  }
+
+  private withTimeout<T>(promise: Promise<T>, timeoutMs: number) {
+    return Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        setTimeout(() => reject(new Error(`Clarification timed out after ${timeoutMs}ms.`)), timeoutMs);
+      })
+    ]);
   }
 }

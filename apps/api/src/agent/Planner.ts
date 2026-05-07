@@ -4,6 +4,8 @@ import { createId } from "../utils/id";
 import { buildPlannerPrompt } from "./prompts";
 import { plannerDraftSchema, type PlannerDraft } from "./schemas";
 
+const PLANNER_TIMEOUT_MS = 25_000;
+
 export class Planner {
   constructor(private readonly llm: AgentLlm) {}
 
@@ -12,9 +14,17 @@ export class Planner {
       return this.mockPlan(intent);
     }
 
-    const draft = await this.planWithRetry(intent, context);
+    try {
+      const draft = await this.withTimeout(
+        this.planWithRetry(intent, context),
+        PLANNER_TIMEOUT_MS,
+        "Planner"
+      );
 
-    return this.normalizePlan(draft, intent);
+      return this.normalizePlan(draft, intent);
+    } catch {
+      return this.mockPlan(intent);
+    }
   }
 
   private async planWithRetry(intent: string, context: MessageContext): Promise<PlannerDraft> {
@@ -105,5 +115,14 @@ export class Planner {
       requiredConfirmations: draft.requiredConfirmations,
       risks: draft.risks
     };
+  }
+
+  private withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string) {
+    return Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms.`)), timeoutMs);
+      })
+    ]);
   }
 }

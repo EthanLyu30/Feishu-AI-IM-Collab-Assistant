@@ -2,14 +2,61 @@ import type { MessageContext } from "@agent-pilot/shared";
 import type { AgentLlm } from "../llm/AgentLlm";
 import { buildDocPrompt, buildRehearsalPrompt, buildSlidesPrompt } from "./prompts";
 
+const AI_CONTENT_TIMEOUT_MS = 18_000;
+
 export class ContentComposer {
   constructor(private readonly llm: AgentLlm) {}
 
   async createRequirementsDoc(intent: string, context: MessageContext) {
+    const fallback = this.fallbackRequirementsDoc();
     if (this.llm.mode === "doubao") {
-      return this.llm.completeText(buildDocPrompt(intent, context), { temperature: 0.2 });
+      return this.completeTextOrFallback(buildDocPrompt(intent, context), fallback, "requirements doc");
     }
 
+    return fallback;
+  }
+
+  async createSlides(docMarkdown: string) {
+    const fallback = this.fallbackSlides();
+    if (this.llm.mode === "doubao") {
+      return this.completeTextOrFallback(buildSlidesPrompt(docMarkdown), fallback, "slides");
+    }
+
+    return fallback;
+  }
+
+  async createRehearsal(slidesMarkdown: string) {
+    const fallback = this.fallbackRehearsal();
+    if (this.llm.mode === "doubao") {
+      return this.completeTextOrFallback(buildRehearsalPrompt(slidesMarkdown), fallback, "rehearsal");
+    }
+
+    return fallback;
+  }
+
+  async applyFollowUp(docMarkdown: string, command: string) {
+    if (this.llm.mode === "doubao") {
+      return this.completeTextOrFallback(
+        [
+          {
+            role: "system",
+            content:
+              "你是文档编辑 Agent。请根据用户追加指令修改现有需求文档，保持 Markdown 格式，只输出完整修改后的文档。"
+          },
+          {
+            role: "user",
+            content: JSON.stringify({ command, docMarkdown }, null, 2)
+          }
+        ],
+        this.fallbackFollowUp(docMarkdown),
+        "doc follow-up"
+      );
+    }
+
+    return this.fallbackFollowUp(docMarkdown);
+  }
+
+  private fallbackRequirementsDoc() {
     return `# 校园活动报名系统需求文档
 
 ## 1. 背景与痛点
@@ -45,11 +92,7 @@ export class ContentComposer {
 `;
   }
 
-  async createSlides(docMarkdown: string) {
-    if (this.llm.mode === "doubao") {
-      return this.llm.completeText(buildSlidesPrompt(docMarkdown), { temperature: 0.2 });
-    }
-
+  private fallbackSlides() {
     return `# 校园活动报名系统汇报 PPT
 
 ## 第 1 页：Agent-Pilot 校园活动报名系统
@@ -114,11 +157,7 @@ export class ContentComposer {
 `;
   }
 
-  async createRehearsal(slidesMarkdown: string) {
-    if (this.llm.mode === "doubao") {
-      return this.llm.completeText(buildRehearsalPrompt(slidesMarkdown), { temperature: 0.2 });
-    }
-
+  private fallbackRehearsal() {
     return `# 3 分钟汇报讲稿
 
 大家好，我们这次要解决的是校园活动报名过程中的协同问题。现在很多活动依赖群消息和人工表格收集报名，信息容易分散，老师统计成本高，学生也很难确认自己是否报名成功。
@@ -131,24 +170,7 @@ export class ContentComposer {
 `;
   }
 
-  async applyFollowUp(docMarkdown: string, command: string) {
-    if (this.llm.mode === "doubao") {
-      return this.llm.completeText(
-        [
-          {
-            role: "system",
-            content:
-              "你是文档编辑 Agent。请根据用户追加指令修改现有需求文档，保持 Markdown 格式，只输出完整修改后的文档。"
-          },
-          {
-            role: "user",
-            content: JSON.stringify({ command, docMarkdown }, null, 2)
-          }
-        ],
-        { temperature: 0.2 }
-      );
-    }
-
+  private fallbackFollowUp(docMarkdown: string) {
     return `${docMarkdown}
 
 ## 6. 权限管理补充
@@ -173,5 +195,24 @@ export class ContentComposer {
 - 配置活动分类、容量限制和系统级规则。
 `;
   }
-}
 
+  private async completeTextOrFallback(
+    messages: Parameters<AgentLlm["completeText"]>[0],
+    fallback: string,
+    label: string
+  ) {
+    try {
+      return await Promise.race([
+        this.llm.completeText(messages, { temperature: 0.2 }),
+        new Promise<string>((_, reject) => {
+          setTimeout(
+            () => reject(new Error(`${label} generation timed out after ${AI_CONTENT_TIMEOUT_MS}ms.`)),
+            AI_CONTENT_TIMEOUT_MS
+          );
+        })
+      ]);
+    } catch {
+      return fallback;
+    }
+  }
+}
